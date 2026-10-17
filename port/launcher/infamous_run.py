@@ -29,7 +29,9 @@ import userdata
 FROZEN = bool(getattr(sys, 'frozen', False))
 PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
 REPO_DIR = PORT_DIR.parent
-OUT_DIR = PORT_DIR / 'out'
+# A package that cannot write next to itself (the AppImage: a read-only Nix store) keeps the
+# generated files in its data folder, ISS_OUT_DIR, and names its loader in ISS_PROBE.
+OUT_DIR = Path(os.environ['ISS_OUT_DIR']) if os.environ.get('ISS_OUT_DIR') else PORT_DIR / 'out'
 
 
 def user_dir():
@@ -46,7 +48,8 @@ def __getattr__(name):  # old code that still reads tlg_run.USER_DIR gets the cu
 
 
 LOG_DIR = OUT_DIR / 'logs'
-PROBE = OUT_DIR / ('tlg-probe.exe' if os.name == 'nt' else 'tlg-probe')
+PROBE = (Path(os.environ['ISS_PROBE']) if os.environ.get('ISS_PROBE')
+         else OUT_DIR / ('tlg-probe.exe' if os.name == 'nt' else 'tlg-probe'))
 KEEP_LOGS = 30
 
 # Game language: PS4 system language ids (sceSystemServiceParamGetInt LANG). The list the game
@@ -544,6 +547,7 @@ def save_experimental(settings, states):
 
 def build_env(settings, extra=None):
     env = dict(os.environ)
+    env.pop('ISS_LAUNCHER_WAITS_FOR_GAME', None)   # the launcher's own (wait_for_games), not the game's
     for key, value in DEFAULT_ENV.items():
         env.setdefault(key, value)  # explicit ISS_* in the environment always win
     env['ISS_GC_BUDGET_MB'] = os.environ.get('ISS_GC_BUDGET_MB', str(int(settings['vram_budget_mb'])))
@@ -637,6 +641,31 @@ def open_external(target):
             return False
 
 
+# The games launch() started, for wait_for_games() when the launcher's process exits.
+_GAMES = []
+
+
+def wait_for_games():
+    """The launcher's last step before its process exits (both launchers). In the Linux
+    packages the game's own files (its program and libraries, the Vulkan drivers) are mounted for
+    the launcher's process only: the AppImage removes the mount when that process exits, and a
+    game still running from it then dies the next time it needs a page of its code that is not
+    in memory yet (SIGBUS, in a different library each time). There the launcher keeps its
+    process, with no window and no event loop, until the games it started have exited.
+    packaging/default.nix sets ISS_LAUNCHER_WAITS_FOR_GAME=1; elsewhere the launcher exits at once."""
+    if os.environ.get('ISS_LAUNCHER_WAITS_FOR_GAME') != '1':
+        return
+    running = [process for process in _GAMES if process.poll() is None]
+    if running:
+        print('Launcher closed; its process stays until the game exits (the game runs from the '
+              "package's files, mounted for this process)", file=sys.stderr, flush=True)
+    try:
+        for process in running:
+            process.wait()
+    except KeyboardInterrupt:   # Ctrl+C in the terminal: leave now
+        pass
+
+
 def detach_options():
     """Popen options that make the game an independent process: closing the launcher (or its
     terminal) does not reach it. Linux: its own session. Windows: its own process group and no
@@ -671,6 +700,7 @@ def launch(settings, seconds=0, extra_env=None):
         process = subprocess.Popen(cmd, cwd=str(data), env=build_env(settings, extra_env),
                                    stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                                    **detach_options())
+    _GAMES[:] = [game for game in _GAMES if game.poll() is None] + [process]
     return process, log
 
 

@@ -14,6 +14,7 @@
 
 #include <vk_mem_alloc.h>
 
+#include "tlg_graphics.h"
 #include "tlg_settings.h"
 #include "tlg_toggles.h"
 #include "ffx_vk_portable.h"
@@ -257,6 +258,17 @@ float Halton(u32 index, u32 base) {
 }
 } // namespace
 
+namespace {
+// tlg: the menu's render resolution (scene_res), used while no temporal upscaler runs (none is
+// offered in inFAMOUS): the scene's host targets get that size and are upscaled with a linear
+// filter wherever the game reads them at 1920x1080 (SceneTargets::Copy).
+SceneResolution::Size MenuSceneSize() {
+    const int i = std::clamp(TlgSettings::Get().scene_res.load(), 0,
+                             int(TlgGraphics::SceneResolutions.size()) - 1);
+    return {u32(TlgGraphics::SceneWidths[i]), u32(TlgGraphics::SceneHeights[i])};
+}
+} // namespace
+
 bool TemporalUpscaler::ReducedScene(const VideoCore::Image& color) const {
     return !scaled_session && scene_targets.Reduced() && scene_targets.EligibleScene(color);
 }
@@ -317,8 +329,10 @@ bool TemporalUpscaler::OnFrameStart() {
     // Dynamic scene resolution scaling (live preset switching) works on all GPUs.
     // On GPUs without D32S8 blit support, UI depth is cleared instead of copied from scene.
     if (!scaled_session) {
-        scene_targets.SetSize(SceneResolution::ForPreset(active ? preset : 0,
-                                                        {target_width, target_height}));
+        scene_targets.SetSize(!active && !Scaled()
+                                  ? MenuSceneSize()
+                                  : SceneResolution::ForPreset(active ? preset : 0,
+                                                               {target_width, target_height}));
         render_width = scene_targets.Size().width;
         render_height = scene_targets.Size().height;
     }

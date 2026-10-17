@@ -3,6 +3,7 @@
 
 #ifdef __linux__
 #include <ucontext.h>
+#include "../../../src/guest_cpu.h"
 #endif
 #include <vector>
 #include <chrono>
@@ -85,10 +86,15 @@ struct PageManager::Impl {
         static std::mutex mutex;
         static std::unordered_map<u64, FaultSite> sites;
         static auto window = std::chrono::steady_clock::now();
-        const auto* uc = static_cast<ucontext_t*>(context);
-        const u64 rip = static_cast<u64>(uc->uc_mcontext.gregs[REG_RIP]);
-        // The return address at the top of the stack (right for leaf routines such as memcpy).
-        const u64 caller = *reinterpret_cast<const u64*>(uc->uc_mcontext.gregs[REG_RSP]);
+        // tlg (aarch64): the game's registers through guest_cpu.h (the host's on x86-64).
+        GuestRegs regs{};
+        const int in_guest = guest_cpu_signal_regs(context, &regs);
+        const u64 rip = in_guest == GUEST_CPU_IN_GUEST ? regs.rip : u64(guest_cpu_host_pc(context));
+        // The return address at the top of the stack (right for leaf routines such as memcpy);
+        // for host code the game called, its return address into the game.
+        const u64 caller = in_guest == GUEST_CPU_IN_HOST_CALL
+                               ? regs.rip
+                               : *reinterpret_cast<const u64*>(regs.gpr[GUEST_RSP]);
         std::scoped_lock lock{mutex};
         auto& site = sites[rip];
         ++site.count;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
+#include <vulkan/vulkan_format_traits.hpp> // vk::componentCount
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -199,9 +200,22 @@ void SceneTargets::Copy(Entry& e, VideoCore::Image& original, bool to_native) {
                               s32(std::max(1u, original.info.size.height >> e.level)), 1};
     const vk::Offset3D reduced{s32(e.image.image_ci.extent.width),
                                s32(e.image.image_ci.extent.height), 1};
+    // tlg: color with 3+ channels and linear filtering (the scene, the frame) is scaled with a
+    // linear filter: at the menu's render resolution (scene_res) no FSR reconstructs it, and
+    // nearest made 720p blocky. Depth/stencil and 1-2 channel data stay nearest.
+    // TLG_SCENE_NEAREST=1: nearest for everything (A/B).
+    static const bool nearest_only = [] {
+        const char* env = std::getenv("TLG_SCENE_NEAREST");
+        return env && env[0] == '1';
+    }();
+    const auto vk_format = original.backing->image.image_ci.format;
+    const bool linear_color = !nearest_only && vk::componentCount(vk_format) >= 3 &&
+        bool(Features(vk_format) & vk::FormatFeatureFlagBits::eSampledImageFilterLinear);
     for (auto aspect : {vk::ImageAspectFlagBits::eColor, vk::ImageAspectFlagBits::eDepth,
                         vk::ImageAspectFlagBits::eStencil}) {
         if (!(original.aspect_mask & aspect)) continue;
+        const vk::Filter filter = aspect == vk::ImageAspectFlagBits::eColor && linear_color
+                                      ? vk::Filter::eLinear : vk::Filter::eNearest;
         const vk::ImageBlit region{
             .srcSubresource = {aspect, to_native ? 0u : e.level, 0, 1},
             .srcOffsets = std::array{vk::Offset3D{}, to_native ? reduced : native},
@@ -210,9 +224,9 @@ void SceneTargets::Copy(Entry& e, VideoCore::Image& original, bool to_native) {
         };
         // Nearest preserves depth/stencil and avoids assuming linear blit support for
         // integer G-buffer formats. FSR reconstructs color at the HDR scene boundary.
-        scheduler.Record([src,dst,region](vk::CommandBuffer cmd) {
+        scheduler.Record([src,dst,region,filter](vk::CommandBuffer cmd) {
             cmd.blitImage(src, vk::ImageLayout::eTransferSrcOptimal, dst,
-                          vk::ImageLayout::eTransferDstOptimal, region, vk::Filter::eNearest);
+                          vk::ImageLayout::eTransferDstOptimal, region, filter);
         });
     }
     if (to_native) e.state.Resolved(); else e.state.CopiedToProxy();

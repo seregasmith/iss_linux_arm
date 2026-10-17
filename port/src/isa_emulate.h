@@ -6,7 +6,11 @@
 #define TLG_ISA_EMULATE_H
 #include <stdint.h>
 #ifndef ABI               /* same as runtime.h, which needs sigjmp_buf (_GNU_SOURCE) */
+#if defined(__x86_64__)
 #define ABI __attribute__((sysv_abi))
+#else
+#define ABI
+#endif
 #endif
 
 enum { ISA_MOVBE_LOAD = 1, ISA_MOVBE_STORE, ISA_LZCNT, ISA_TZCNT, ISA_ANDN, ISA_BEXTR, ISA_BLSI, ISA_BLSMSK, ISA_BLSR, ISA_VCVTPH2PS, ISA_VCVTPS2PH,

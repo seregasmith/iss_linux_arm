@@ -5,7 +5,14 @@
 #include <cstdint>
 #include "../../src/cheat_hook.h"
 
-extern "C" float __attribute__((sysv_abi)) tlg_orbs_gain(void* player, float requested) {
+// tlg (aarch64): the guest's x86-64 stub calls this with the System V convention, the host's
+// own on x86-64; elsewhere the guest CPU converts the call.
+#if defined(__x86_64__)
+#define TLG_ORBS_ABI __attribute__((sysv_abi))
+#else
+#define TLG_ORBS_ABI
+#endif
+extern "C" float TLG_ORBS_ABI tlg_orbs_gain(void* player, float requested) {
     float balance;
     std::memcpy(&balance, static_cast<unsigned char*>(player) + 0x1e8, sizeof(balance));
     const auto& settings = TlgSettings::Get();

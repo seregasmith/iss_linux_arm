@@ -22,6 +22,12 @@ inline constexpr std::array<int, 5> FpsLimits = {30, 60, 120, 240, 0};
 /// Game patch suffixes ("Resolution Patch - <name>"); "native" is no resolution patch.
 inline constexpr std::array<std::string_view, 6> Resolutions = {"native", "480p", "720p",
                                                                 "1440p", "1800p", "4K"};
+/// tlg: the 3D scene's render resolution (tlg.ini scene_res: the in-game menu and the launcher).
+/// The scene's host render targets get this size (SceneTargets); the game's own 1920x1080
+/// targets and its compute passes read the scene through an upscale. 1080p is the game's own.
+inline constexpr std::array<std::string_view, 4> SceneResolutions = {"1080p", "900p", "720p", "540p"};
+inline constexpr std::array<int, 4> SceneWidths = {1920, 1600, 1280, 960};
+inline constexpr std::array<int, 4> SceneHeights = {1080, 900, 720, 540};
 /// Engine frame rate ceilings: 60 is the game's own, 120 and 240 are frame rate patches.
 inline constexpr std::array<int, 3> EngineFps = {60, 120, 240};
 
@@ -58,6 +64,10 @@ inline int ParseResolution(std::string_view text) {
 /// A listed ceiling, else 120 (the default patch).
 inline int ParseEngineFps(int value) {
     return IndexOf(EngineFps, value, -1) >= 0 ? value : 120;
+}
+/// Index into SceneResolutions; unknown text is 1080p.
+inline int ParseSceneResolution(std::string_view text) {
+    return IndexOf(SceneResolutions, text, 0);
 }
 
 /// Frames the GPU command thread may queue ahead of the GPU; 0 = unbounded.

@@ -8,6 +8,7 @@
  */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "guest_cpu.h"
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>
@@ -117,7 +118,7 @@ static ABI int32_t socket_down(void) {
 #define FIBER_ERR_PERMISSION ((int32_t)0x80590005)
 #define FIBER_ERR_STATE ((int32_t)0x80590006)
 typedef void (ABI *FiberEntry)(uint64_t arg_on_initialize,uint64_t arg_on_run);
-#ifndef _WIN32
+#if !defined(_WIN32) && defined(GUEST_CPU_NATIVE)
 typedef struct HostFiber {
     ucontext_t context;
     FiberEntry entry;
@@ -211,6 +212,34 @@ static ABI int32_t fiber_return_to_thread(uint64_t arg_on_return,uint64_t *arg_o
     fiber_tls.current=NULL;
     swapcontext(&from->context,&fiber_tls.thread_context);
     return 0;
+}
+#elif !defined(_WIN32)
+/* Other hosts (aarch64): the game's code runs in FEXCore's JIT, and a fiber switch would have to
+ * switch the guest CPU's state and its JIT frames together with the host context. Not done yet: a
+ * game that uses fibers stops at its first one, with the function's name. */
+static __attribute__((noreturn)) void fiber_unsupported(const char *what) {
+    fprintf(stderr,"STOP: %s: fibers are not supported with the guest CPU of this host yet\n",what);
+    fflush(NULL);
+    exit(21);
+}
+static ABI int32_t fiber_initialize(void *guest,const char *name,FiberEntry entry,uint64_t arg_on_initialize,
+                                    void *context,uint64_t context_size,const void *option,uint32_t build_version) {
+    (void)guest; (void)name; (void)entry; (void)arg_on_initialize; (void)context; (void)context_size;
+    (void)option; (void)build_version;
+    fiber_unsupported("sceFiberInitialize");
+}
+static ABI int32_t fiber_finalize(void *guest) { (void)guest; fiber_unsupported("sceFiberFinalize"); }
+static ABI int32_t fiber_run(void *guest,uint64_t arg_on_run_to,uint64_t *arg_on_return) {
+    (void)guest; (void)arg_on_run_to; (void)arg_on_return;
+    fiber_unsupported("sceFiberRun");
+}
+static ABI int32_t fiber_switch(void *guest,uint64_t arg_on_run_to,uint64_t *arg_on_run) {
+    (void)guest; (void)arg_on_run_to; (void)arg_on_run;
+    fiber_unsupported("sceFiberSwitch");
+}
+static ABI int32_t fiber_return_to_thread(uint64_t arg_on_return,uint64_t *arg_on_run) {
+    (void)arg_on_return; (void)arg_on_run;
+    fiber_unsupported("sceFiberReturnToThread");
 }
 #else
 /* Windows: Win32 fibers. Each fiber gets its own stack from the system (the game's context

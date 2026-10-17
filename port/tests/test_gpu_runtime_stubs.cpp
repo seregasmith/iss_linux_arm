@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <setjmp.h>
+#include "../src/guest_cpu.h"
 // Renderer tests have no guest process. Clock/host-thread services work; guest accesses abort.
 extern "C" {
 thread_local sigjmp_buf* runtime_fault_recover = nullptr;
@@ -24,5 +25,10 @@ int32_t* runtime_errno() { std::abort(); }
 int runtime_memory_write_backing(uintptr_t, const void*, uint64_t) { std::abort(); }
 int runtime_memory_read_backing(uintptr_t, void*, uint64_t) { std::abort(); }
 void runtime_report() {}
+// guest_cpu.h (the loader's runtime_cpu.c on x86-64, the guest CPU library on aarch64): no guest
+// code runs in these tests.
+int guest_cpu_signal_regs(const void*, GuestRegs*) { std::abort(); }
+uintptr_t guest_cpu_host_pc(const void*) { std::abort(); }
+uint64_t guest_cpu_call(uintptr_t, unsigned, const uint64_t*) { std::abort(); }
 }
 

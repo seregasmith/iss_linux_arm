@@ -77,7 +77,10 @@ def user_dir_source(env=None, pointer=None):
 
 
 def default_dir(port_dir):
-    return Path(port_dir) / 'user'
+    """<port folder>/user; a package that cannot write next to itself (the AppImage) names its own
+    default in ISS_DEFAULT_USER_DIR."""
+    packaged = os.environ.get('ISS_DEFAULT_USER_DIR')
+    return Path(packaged).expanduser() if packaged else Path(port_dir) / 'user'
 
 
 def user_dir(port_dir, env=None, pointer=None):

@@ -30,7 +30,7 @@ class PackagedVulkanTests(unittest.TestCase):
     def library(self, name, bits=64):
         path = self.libs / name
         path.write_bytes(b"\x7fELF" + bytes([2 if bits == 64 else 1, 1]) +
-                         b"\0" * 12 + b"\x3e\0")
+                         b"\0" * 12 + vulkan.HOST_MACHINE)   # this host's CPU (x86-64 or aarch64)
         return path
 
     def manifest(self, library="libGLX_nvidia.so.0"):

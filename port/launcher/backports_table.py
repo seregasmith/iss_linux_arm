@@ -61,6 +61,13 @@ def _menu(tab, key, vtype, default, name, what, **kw):
 _CORNERS = (('0', 'Top left', 'Superior esquerdo'), ('1', 'Top right', 'Superior direito'),
             ('2', 'Bottom left', 'Inferior esquerdo'), ('3', 'Bottom right', 'Inferior direito'))
 MENU = [
+    _menu('Image', 'scene_res', 'choice', '1080p', ('Render resolution', 'Resolução de renderização'),
+          ('Draws the 3D scene at this size and upscales it to 1080p. Lower: faster when the GPU is the limit, '
+           'softer image. Experimental.',
+           'Desenha a cena 3D neste tamanho e amplia para 1080p. Menor: mais rápido quando a GPU é o limite, '
+           'imagem mais suave. Experimental.'),
+          choices=(('1080p', '1080p (native)', '1080p (nativa)'), ('900p', '900p', '900p'),
+                   ('720p', '720p', '720p'), ('540p', '540p', '540p'))),
     _menu('Image', 'fsr1', 'bool', '0', ('Upscale with FSR 1', 'Ampliar com FSR 1'),
           ('Enlarges the game image when it is smaller than the window (spatial filter, no shimmer).',
            'Amplia a imagem do jogo quando ela é menor que a janela (filtro espacial, sem tremor).')),

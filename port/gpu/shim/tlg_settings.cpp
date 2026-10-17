@@ -155,6 +155,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.rcas_strength = TlgGraphics::ParseRcasStrength(value.empty() ? -1 : i);
     } else if (key == "frames_queued") {
         v.frames_queued = TlgGraphics::ParseFramesQueued(value.empty() ? -1 : i);
+    } else if (key == "scene_res") {
+        v.scene_res = TlgGraphics::ParseSceneResolution(value);
     } else if (key == "render_resolution") {
         v.render_resolution = TlgGraphics::ParseResolution(value);
     } else if (key == "engine_fps") {
@@ -251,7 +253,7 @@ void Load() {
         {"TLG_LOD_SCALE", "lod_scale"},           {"TLG_LOD_BANDS", "lod_bands"},
         {"TLG_REGION_LOD", "region_lod"},         {"TLG_REGION_FADE", "region_fade"},
         {"TLG_NEAR_CLIP", "near_clip"},           {"TLG_FAR_CLIP", "far_clip"},
-        {"TLG_MIP_LOD_BIAS", "mip_lod_bias"},
+        {"TLG_MIP_LOD_BIAS", "mip_lod_bias"},     {"TLG_SCENE_RES", "scene_res"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env); value && value[0]) {
@@ -377,6 +379,9 @@ void Save() {
                  TlgGraphics::Resolutions[std::clamp(v.render_resolution.load(), 0, 5)].data(),
                  v.engine_fps.load(), int(v.deferred_readback.load()), int(v.stale_readback.load()),
                  int(v.restart_unconfirmed.load()));
+    std::fprintf(file, "scene_res=%s\n",
+                 TlgGraphics::SceneResolutions[std::clamp(v.scene_res.load(), 0,
+                     int(TlgGraphics::SceneResolutions.size()) - 1)].data());
     std::fprintf(file, "sensor_aim=%d\ngraffiti_guide_seen=%d\n", v.sensor_aim.load(),
                  int(v.graffiti_guide_seen.load()));
     std::fprintf(file,

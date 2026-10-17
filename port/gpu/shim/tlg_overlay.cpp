@@ -362,6 +362,11 @@ void ImageTab() {
         ChoiceRow(TL("Display mode", "Modo de exibição"), s.display_mode, G::DisplayModeCount == 3 ? modes : G::DisplayModeNames.data(),
                   nullptr, G::DisplayModeCount, TL("Windowed, borderless window or exclusive fullscreen.", "Janela, janela sem borda ou tela cheia exclusiva."));
         CheckRow("VSync", s.vsync, TL("Waits for the monitor: no tearing, a little more input delay.", "Espera o monitor: sem tearing, um pouco mais de atraso de entrada."));
+        static const char* const scene_labels[] = {TL("1080p (native)", "1080p (nativa)"), "900p", "720p", "540p"};
+        ChoiceRow(TL("Render resolution", "Resolução de renderização"), s.scene_res, scene_labels, nullptr,
+                  int(G::SceneResolutions.size()),
+                  TL("Draws the 3D scene at this size and upscales it to 1080p. Lower: faster when the GPU is the limit, softer image. Experimental.",
+                     "Desenha a cena 3D neste tamanho e amplia para 1080p. Menor: mais rápido quando a GPU é o limite, imagem mais suave. Experimental."));
         ImGui::EndTable();
     }
     const int iw = s.image_width, ih = s.image_height, ww = s.window_width, wh = s.window_height;
@@ -628,7 +633,7 @@ void OverlayTab() {
             }
         }
         ImGui::TableNextColumn();
-        ImGui::TextDisabled(TL("Preview", "Prévia"));
+        ImGui::TextDisabled("%s", TL("Preview", "Prévia"));
         ImGui::BeginChild("##preview", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
         ImGui::SetWindowFontScale(s.overlay_scale / 100.0f);
         const std::string text = OverlayText();
@@ -659,7 +664,7 @@ void OverlayTab() {
         if (total) {
             std::snprintf(text, sizeof(text), TL("loading %u%%", "carregando %u%%"), u32(u64(background_done) * 100 / total));
         } else {
-            std::snprintf(text, sizeof(text), TL("ready", "pronto"));
+            std::snprintf(text, sizeof(text), "%s", TL("ready", "pronto"));
         }
         InfoRow(TL("Shader cache", "Cache de shaders"), text);
         ImGui::EndTable();

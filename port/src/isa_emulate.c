@@ -152,11 +152,16 @@ void ABI isa_emulate_sse4a(const IsaSite *site, uint64_t xmm[4]) {
 
 int isa_kind_is_f16c(uint8_t kind) { return kind == ISA_VCVTPH2PS || kind == ISA_VCVTPS2PH; }
 
-/* stmxcsr only stores the control word: no XMM/YMM register is read or written. */
+/* stmxcsr only stores the control word: no XMM/YMM register is read or written. Other hosts never
+ * run the rewrite (their guest CPU, FEXCore, has F16C): the default MXCSR keeps this file building. */
 static uint32_t read_mxcsr(void) {
+#if defined(__x86_64__)
     uint32_t value;
     __asm__ volatile("stmxcsr %0" : "=m"(value));
     return value;
+#else
+    return 0x1f80;
+#endif
 }
 
 uint32_t isa_half_to_float(uint16_t half) {

@@ -13,6 +13,7 @@
  */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "guest_cpu.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -161,10 +162,10 @@ static ABI int32_t font_memory_term(FontMemory *memory) {
     if (!memory) return ERR_INVALID_PARAMETER;
     if (memory->kind!=MEM_MAGIC) return ERR_INVALID_MEMORY;
     if (memory->destroy_callback) {
-        typedef void (ABI *Destroy)(FontMemory *, void *, void *);
-        Destroy destroy=(Destroy)memory->destroy_callback;
+        const uint64_t args[3]={(uint64_t)(uintptr_t)memory,(uint64_t)(uintptr_t)memory->mspace,
+                                (uint64_t)(uintptr_t)memory->destroy_object};
         memory->kind=0;
-        destroy(memory,memory->mspace,memory->destroy_object);
+        guest_cpu_call((uintptr_t)memory->destroy_callback,3,args);
         return FONT_OK;
     }
     memset(memory,0,sizeof(*memory));

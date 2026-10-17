@@ -33,6 +33,9 @@ int main(int argc, char** argv) {
     static const char* const host_only[] = {
         "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GTK_PATH", "GTK_MODULES", "GTK_EXE_PREFIX",
         "GIO_EXTRA_MODULES", "GDK_PIXBUF_MODULEDIR", "PYTHONHOME", "PYTHONPATH",
+        // The host's Qt plugins and QML modules (and a platform theme plugin such as qt6ct)
+        // are built for the host's Qt, not the package's.
+        "QT_PLUGIN_PATH", "QML_IMPORT_PATH", "QML2_IMPORT_PATH", "QT_QPA_PLATFORMTHEME",
     };
     for (size_t i = 0; i < sizeof host_only / sizeof host_only[0]; ++i) {
         drop(host_only[i]);

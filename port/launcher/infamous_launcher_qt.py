@@ -46,6 +46,7 @@ def main():
     for stream in (sys.stdout, sys.stderr):   # None in the windowed executable
         if stream is not None:
             stream.flush()
+    tlg_run.wait_for_games()   # Linux packages: the game runs from files mounted for this process
     os._exit(code if isinstance(code, int) else 0)
 
 

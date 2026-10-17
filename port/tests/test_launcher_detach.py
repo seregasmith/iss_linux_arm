@@ -2,6 +2,8 @@
 """The game runs detached from the launcher and writes its own log file: the log reader
 (launcher/logtail.py), launch() without a pipe, closing the launcher with the game open, and the
 'Close the launcher when the game starts' option."""
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -141,6 +143,11 @@ class LaunchTests(unittest.TestCase):
         self.assertNotIn('text', kwargs)
         self.assertTrue(Path(log).is_file())
 
+    def test_the_game_is_remembered_for_the_launchers_exit(self):
+        with mock.patch.object(infamous_run, '_GAMES', []):
+            process, _, _ = self.launch()
+            self.assertEqual([process], infamous_run._GAMES)
+
     def test_linux_has_its_own_session(self):
         _, _, call = self.launch()
         self.assertIs(True, call.kwargs['start_new_session'])
@@ -162,6 +169,68 @@ class LaunchTests(unittest.TestCase):
                 stdout=out, stderr=infamous_run.subprocess.STDOUT, **infamous_run.detach_options())
         self.assertEqual(0, process.wait(timeout=30))
         self.assertEqual({'out', 'err'}, set(log.read_text().split()))
+
+
+class WaitForGamesTests(unittest.TestCase):
+    """Linux packages: the launcher's process outlives its window while the game runs, since the
+    AppImage mounts the game's own files for that process only."""
+    def setUp(self):
+        patcher = mock.patch.object(infamous_run, '_GAMES', [])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def game(running):
+        process = mock.Mock()
+        process.poll.return_value = None if running else 0
+        return process
+
+    def wait(self, packaged):
+        env = {'ISS_LAUNCHER_WAITS_FOR_GAME': '1'} if packaged else {}
+        with mock.patch.dict(os.environ, env), contextlib.redirect_stderr(io.StringIO()) as err:
+            if not packaged:
+                os.environ.pop('ISS_LAUNCHER_WAITS_FOR_GAME', None)
+            infamous_run.wait_for_games()
+        return err.getvalue()
+
+    def test_outside_the_packages_the_launcher_exits_at_once(self):
+        game = self.game(running=True)
+        infamous_run._GAMES.append(game)
+        self.assertEqual('', self.wait(packaged=False))
+        game.wait.assert_not_called()
+
+    def test_packaged_launcher_waits_for_the_running_game_only(self):
+        running, ended = self.game(running=True), self.game(running=False)
+        infamous_run._GAMES.extend([ended, running])
+        self.assertIn('stays until the game exits', self.wait(packaged=True))
+        running.wait.assert_called_once()
+        ended.wait.assert_not_called()
+
+    def test_nothing_running_nothing_said(self):
+        infamous_run._GAMES.append(self.game(running=False))
+        self.assertEqual('', self.wait(packaged=True))
+
+    def test_real_detached_child_is_waited_for(self):
+        process = infamous_run.subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(0.3)'],
+                                                **infamous_run.detach_options())
+        infamous_run._GAMES.append(process)
+        self.wait(packaged=True)
+        self.assertEqual(0, process.poll())
+
+    def test_the_game_does_not_inherit_the_switch(self):
+        with mock.patch.dict(os.environ, {'ISS_LAUNCHER_WAITS_FOR_GAME': '1'}):
+            env = infamous_run.build_env(dict(infamous_run.DEFAULT_SETTINGS))
+        self.assertNotIn('ISS_LAUNCHER_WAITS_FOR_GAME', env)
+
+    def test_both_launchers_wait_before_their_process_exits(self):
+        qt = (ROOT / 'launcher' / 'infamous_launcher_qt.py').read_text(encoding='utf-8')
+        self.assertLess(qt.index('tlg_run.wait_for_games()'), qt.index('os._exit('))
+        tk = (ROOT / 'launcher' / 'infamous_launcher.py').read_text(encoding='utf-8')
+        self.assertLess(tk.index('root.mainloop()'), tk.index('tlg_run.wait_for_games()'))
+
+    def test_the_package_turns_it_on(self):
+        nix = (ROOT / 'packaging' / 'default.nix').read_text(encoding='utf-8')
+        self.assertIn('--set ISS_LAUNCHER_WAITS_FOR_GAME 1', nix)
 
 
 @unittest.skipUnless(HAVE_QT, 'PySide6 not installed')

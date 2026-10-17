@@ -843,6 +843,7 @@ def main():
         pass
     Launcher(root)
     root.mainloop()
+    tlg_run.wait_for_games()   # Linux packages: the game runs from files mounted for this process
 
 
 if __name__ == '__main__':

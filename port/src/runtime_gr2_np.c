@@ -19,6 +19,7 @@
  */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "guest_cpu.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -55,18 +56,20 @@ static void once(const char *what) {
 #define AT(p,off,type) (*(type *)((char *)(p)+(off)))
 
 /* ---- AppSTLAllocator: the game's AllocImplementation (vtable: allocate(int), deallocate(void*,unsigned)) ---- */
-typedef void *(ABI *AllocFn)(void *self,int32_t size);
-typedef void (ABI *FreeFn)(void *self,void *p,uint32_t size);
+/* Its vtable (guest functions): [0] void *allocate(self, int32_t size), [1] void deallocate(self, p, uint32_t size). */
 static void *_Atomic external_alloc; /* AllocImplementation::externalAlloc */
 
 static void *tk_alloc(uint64_t bytes) {
     void *impl=atomic_load(&external_alloc);
     if (!impl) { once("NpToolkit AppSTLAllocator::allocate before Parameters"); return NULL; }
-    return (*(AllocFn **)impl)[0](impl,(int32_t)bytes);
+    const uint64_t args[2]={(uint64_t)(uintptr_t)impl,(uint64_t)(uint32_t)(int32_t)bytes};
+    return (void *)(uintptr_t)guest_cpu_call((*(const uintptr_t **)impl)[0],2,args);
 }
 static void tk_free(void *p,uint64_t n) {
     void *impl=atomic_load(&external_alloc);
-    if (impl) (*(FreeFn **)impl)[1](impl,p,(uint32_t)n);
+    if (!impl) return;
+    const uint64_t args[3]={(uint64_t)(uintptr_t)impl,(uint64_t)(uintptr_t)p,(uint64_t)(uint32_t)n};
+    guest_cpu_call((*(const uintptr_t **)impl)[1],3,args);
 }
 static ABI void *alloc_char(void *self,uint64_t n,const void *hint) { (void)self; (void)hint; return tk_alloc(n); }
 static ABI void *alloc_npuser(void *self,uint64_t n,const void *hint) { (void)self; (void)hint; return tk_alloc((uint32_t)n*0x310u); }

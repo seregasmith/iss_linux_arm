@@ -1,9 +1,16 @@
 #include "cpu_check.h"
+#if defined(__x86_64__)
 #include <cpuid.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 
 CpuFeatureWords cpu_feature_words(void) {
+#if !defined(__x86_64__)
+    /* The guest CPU is FEXCore's JIT, which implements every Jaguar set the game uses (SSE4.2,
+     * POPCNT, AVX, MOVBE, F16C, BMI1, LZCNT, SSE4A): nothing to rewrite. */
+    return (CpuFeatureWords){(1u << 20) | (1u << 22) | (1u << 23) | (1u << 28) | (1u << 29), 1u << 3, (1u << 5) | (1u << 6)};
+#else
     CpuFeatureWords words = {0, 0, 0};
     unsigned a = 0, b = 0, c = 0, d = 0;
     if (__get_cpuid(1, &a, &b, &c, &d)) words.leaf1_ecx = c;
@@ -11,6 +18,7 @@ CpuFeatureWords cpu_feature_words(void) {
     if (__get_cpuid(0x80000001, &a, &b, &c, &d)) words.ext1_ecx = c;
     (void)a; (void)d;
     return words;
+#endif
 }
 
 /* Jaguar's sets beyond the x86-64 baseline. A missing fatal set stops the game; the rewritable ones

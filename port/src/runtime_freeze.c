@@ -9,6 +9,7 @@
  * process_vm_readv / ReadProcessMemory, so a bad frame pointer cannot fault. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "guest_cpu.h"
 #include "gpu/tlggpu.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -201,8 +202,12 @@ static void capture_signal(int sig, siginfo_t *info, void *context) {
     int saved = errno;
     if (__atomic_load_n(&capture_tid, __ATOMIC_ACQUIRE) == gettid()) {
         Capture *c = __atomic_load_n(&capture_out, __ATOMIC_ACQUIRE);
-        const greg_t *g = ((ucontext_t *)context)->uc_mcontext.gregs;
-        c->rip = (uintptr_t)g[REG_RIP]; c->rsp = (uintptr_t)g[REG_RSP]; c->rbp = (uintptr_t)g[REG_RBP];
+        /* The game's registers (guest_cpu.h): the host's on x86-64 hosts, FEXCore's elsewhere. For host
+         * code the game called, its guest call (rip: the return address into the game). */
+        GuestRegs regs;
+        const int in_guest = guest_cpu_signal_regs(context, &regs);
+        c->rip = in_guest ? (uintptr_t)regs.rip : guest_cpu_host_pc(context);
+        c->rsp = (uintptr_t)regs.gpr[GUEST_RSP]; c->rbp = in_guest ? (uintptr_t)regs.gpr[GUEST_RBP] : 0;
         c->frames = walk_frames(c->rbp, c->chain, MAX_FRAMES);
         c->captured = 1;
         __atomic_store_n(&capture_done, 1, __ATOMIC_RELEASE);

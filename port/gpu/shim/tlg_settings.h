@@ -106,6 +106,9 @@ struct Values {
     std::atomic<bool> fsr4_invert_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
     std::atomic<int> output_res{OutputDefault}; ///< index into OutputWidths
+    /// tlg: index into TlgGraphics::SceneResolutions (scene_res): the scene's render size when no
+    /// temporal upscaler runs. Live: SceneTargets resizes at the next frame.
+    std::atomic<int> scene_res{0};
     /// Live resolution and preset changes (run.sh): 0 off by default (startup patch, fastest
     /// on the Steam Deck and older GPUs), -1 auto (strong discrete GPUs), 1 on. On restart.
     std::atomic<int> live_resolution{0};
