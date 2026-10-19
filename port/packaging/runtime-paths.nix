@@ -1,0 +1,11 @@
+[
+  "/nix/store/09mx9hhrlyj6a03k6jkxrj93zvi4npnw-xxhash-0.8.3"
+  "/nix/store/4n5jdf2170lrq2q6als3w6akd6s70isv-vulkan-loader-1.4.357.0"
+  "/nix/store/55vdrfh4zshi37p8hbwld5qvjs82pisg-fmt-12.2.0"
+  "/nix/store/b5z66cvng3hvgfg47wk2b4xzdflrakj3-freetype-2.14.3"
+  "/nix/store/hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25"
+  "/nix/store/i51bvf2pr5b3vdz1lnkhmilb6psprq37-sdl3-3.4.16-lib"
+  "/nix/store/kamv6nii5127y32pyprqnfk8kc824x02-libx11-1.8.13"
+  "/nix/store/na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib"
+  "/nix/store/q8yxfk8r15j6h97i30r4v3c5awifv28i-ffmpeg-headless-9.0.1-lib"
+]
