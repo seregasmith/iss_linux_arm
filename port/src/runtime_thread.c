@@ -24,7 +24,6 @@
 #include <sys/syscall.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
-#include <asm/prctl.h>
 #endif
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define ATTR_MAGIC UINT32_C(0x41545452)

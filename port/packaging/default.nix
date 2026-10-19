@@ -21,7 +21,7 @@ let
   arm = pkgs.stdenv.hostPlatform.isAarch64;
   root = ./..;
   getEnvOr = names: lib.findFirst (value: value != "") "" (map builtins.getEnv names);
-  assetDirs = [ "scripts" "launcher" "tools/xpps" ];
+  assetDirs = [ "scripts" "launcher" "patches" "tools/xpps" ];
   # Only what the package needs (the tree also holds builds, profiles, caches and the game's files).
   wanted = [
     "LICENSE" "packaging" "packaging/README-player.md" "tools"
@@ -201,7 +201,7 @@ pkgs.stdenv.mkDerivation {
     runHook preInstall
     d=${share}
     mkdir -p $d/bin $d/tools $out/bin $out/libexec
-    cp -r scripts launcher $d/
+    cp -r scripts launcher patches $d/
     cp -r tools/xpps $d/tools/
     install -m644 LICENSE packaging/README-player.md $d/
     install -m755 out/tlg-probe out/tlg-gpu-capabilities $d/bin/

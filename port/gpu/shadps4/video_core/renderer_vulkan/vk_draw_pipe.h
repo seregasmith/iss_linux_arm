@@ -206,11 +206,11 @@ private:
         // tlg: the ring holds 16 MB (many frames of packets): a full ring means stage B is far
         // behind, so this wait is worth reporting (TLG_FRAME_STATS).
         ++ring_waits;
-        const u64 start = __rdtsc();
+        const u64 start = TlgCpu::Cycles();
         for (u32 spins = 0; at + size - consumed.load(std::memory_order_acquire) > Capacity;
              ++spins) {
             if (spins < 4096) {
-                __builtin_ia32_pause();
+                TlgCpu::Pause();
             } else if (RingSleep()) {
                 SleepUntilSpace(at + size);
                 break;
@@ -219,7 +219,7 @@ private:
             }
             TlgCpu::Pause();
         }
-        ring_wait_cycles += __rdtsc() - start;
+        ring_wait_cycles += TlgCpu::Cycles() - start;
     }
 
     /// tlg: TLG_PIPE_RING_SLEEP=1 sleeps on `consumed` (as an outlived drain does) instead of
@@ -272,7 +272,7 @@ private:
                     return TlgThreads::SizingCount() >= 12 ? 200 : 50;
                 }());
                 const auto spin_until = std::chrono::steady_clock::now() + spin_time;
-                const u64 spin_start = __rdtsc();
+                const u64 spin_start = TlgCpu::Cycles();
                 for (u32 spins = 1; available == at; ++spins) {
                     if (stop.stop_requested()) {
                         return;
@@ -292,7 +292,7 @@ private:
                 }
                 // tlg: how much of stage B is spent spinning for a packet (a core taken from
                 // the game's threads), reported as idle, not as work.
-                spin_cycles.fetch_add(__rdtsc() - spin_start, std::memory_order_relaxed);
+                spin_cycles.fetch_add(TlgCpu::Cycles() - spin_start, std::memory_order_relaxed);
             }
             const auto* header = reinterpret_cast<const Header*>(ring.get() + at % Capacity);
             if (header->size == 0) {
