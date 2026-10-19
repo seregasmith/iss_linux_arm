@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cassert>
+#include <cstdlib>
 #include <deque>
 #include <utility>
 
@@ -11,6 +12,12 @@ namespace VideoCore {
 template <typename Payload>
 class ReadbackQueue {
 public:
+    /// tlg: the queue fills up from the GPU command thread; a full queue makes it wait for the
+    /// GPU (scheduler.Finish, ProcessDownloadImages) instead of recording. TLG_READBACK_QUEUE_MB
+    /// and TLG_READBACK_QUEUE_ENTRIES size it; the defaults are the old fixed 64 MiB / 64 copies.
+    ReadbackQueue()
+        : max_entries{EnvLimit("TLG_READBACK_QUEUE_ENTRIES", 64)},
+          max_bytes{EnvLimit("TLG_READBACK_QUEUE_MB", 64) << 20} {}
     struct Entry {
         std::uint64_t address, size, tick;
         Payload payload;
@@ -18,7 +25,7 @@ public:
         bool watched = true; ///< still protects its pages (see ReleaseOutside)
     };
     bool CanFit(std::uint64_t size) const {
-        return entries.size() < 64 && size <= MaxBytes && bytes <= MaxBytes - size;
+        return entries.size() < max_entries && size <= max_bytes && bytes <= max_bytes - size;
     }
     void Push(std::uint64_t address, std::uint64_t size, std::uint64_t tick, Payload payload) {
         assert(CanFit(size));
@@ -70,6 +77,7 @@ public:
         }
     }
     std::uint64_t Bytes() const { return bytes; }
+    bool Empty() const { return entries.empty(); }
 
 private:
     static bool OverlapsPage(const Entry& entry, std::uint64_t address, std::uint64_t size) {
@@ -82,7 +90,14 @@ private:
         if (!exact) return OverlapsPage(entry, address, size);
         return size && address < entry.address + entry.size && entry.address < address + size;
     }
-    static constexpr std::uint64_t MaxBytes = 64ull << 20;
+    /// tlg: 0 or unset keeps the default (see the constructor).
+    static std::uint64_t EnvLimit(const char* name, std::uint64_t fallback) {
+        const char* value = std::getenv(name);
+        const std::uint64_t limit = value && *value ? std::strtoull(value, nullptr, 10) : 0;
+        return limit ? limit : fallback;
+    }
+    const std::uint64_t max_entries;
+    const std::uint64_t max_bytes;
     std::deque<Entry> entries;
     std::uint64_t bytes = 0;
 };

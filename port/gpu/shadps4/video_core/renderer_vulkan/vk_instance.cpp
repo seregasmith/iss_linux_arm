@@ -230,8 +230,11 @@ std::string Instance::GetDriverVersionName() {
 
 namespace {
 bool PipelineBinaryCacheRequested() {
+    // tlg: off by default (2026-10-17): restoring a VK_KHR_pipeline_binary ends the game on the
+    // NVIDIA 595 driver, and the launcher already sets ISS_PIPELINE_BINARIES=0.
+    // TLG_PIPELINE_BINARIES=1 (ISS_PIPELINE_BINARIES in the launcher) turns it back on.
     const char* setting = std::getenv("TLG_PIPELINE_BINARIES");
-    return !setting || *setting != '0';
+    return setting && (*setting == '1' || *setting == 'y' || *setting == 't');
 }
 }
 

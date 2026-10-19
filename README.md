@@ -2,6 +2,8 @@
 
 <h1 align="center">inFAMOUS Second Son — port nativo para PC</h1>
 
+<p align="center"><a href="https://buymeacoffee.com/hayatog"><img src="https://img.shields.io/badge/Buy_me_a_coffee-Apoie_o_projeto-FFDD00?logo=buymeacoffee&amp;logoColor=000000" alt="Apoie com um café / Buy me a coffee"></a></p>
+
 <p align="center">
   <a href="#english"><b>English below</b></a> ·
   <a href="https://github.com/HayatoG/iss_pc/releases/latest">Download</a> ·
@@ -12,6 +14,11 @@
 <p align="center"><a href="https://github.com/sponsors/HayatoG"><img src="https://img.shields.io/badge/Sponsor-HayatoG-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor HayatoG on GitHub"></a></p>
 
 <p align="center"><a href="https://github.com/HayatoG/iss_pc/actions/workflows/build.yml"><img src="https://github.com/HayatoG/iss_pc/actions/workflows/build.yml/badge.svg" alt="Build"></a></p>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/307125?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-307125" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/307125/daily?language=C%2B%2B" alt="HayatoG/iss_pc | Trendshift (daily)" width="250" height="55"></a>
+  <a href="https://trendshift.io/repositories/307125?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-307125" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/307125/weekly?language=C%2B%2B" alt="HayatoG/iss_pc | Trendshift (weekly)" width="250" height="55"></a>
+</p>
 
 > **Jogável, em desenvolvimento.** O jogo inicia, chega ao gameplay e passa pelos primeiros capítulos, mas o desempenho ainda é instável (20–30 FPS típicos numa RTX 2060) e há falhas de imagem conhecidas. Veja o [Status](#status).
 
@@ -30,9 +37,22 @@ Por **HayatoG** · YouTube [@hayatog-dev](https://www.youtube.com/@hayatog-dev) 
 
 <sub>Capturas na resolução nativa (1920×1080, reduzidas para 1280), direto da GPU, no Linux com uma RTX 2060.</sub>
 
+## Contribuidores / Contributors
+
+<p align="center">
+  <a href="https://github.com/HayatoG"><img src="https://avatars.githubusercontent.com/u/22659047?v=4" width="72" alt="Foto de perfil de contribuidor"></a>&nbsp;&nbsp;
+  <a href="https://github.com/intemerated"><img src="https://avatars.githubusercontent.com/u/343755099?v=4" width="72" alt="Foto de perfil de contribuidor"></a>&nbsp;&nbsp;
+  <a href="https://github.com/Andretuta"><img src="https://avatars.githubusercontent.com/u/219594641?v=4" width="72" alt="Foto de perfil de contribuidor"></a>&nbsp;&nbsp;
+  <a href="https://github.com/Playdbunny"><img src="https://avatars.githubusercontent.com/u/70190491?v=4" width="72" alt="Foto de perfil de contribuidor"></a>&nbsp;&nbsp;
+  <a href="https://github.com/EdouardSence"><img src="https://avatars.githubusercontent.com/u/103503538?v=4" width="72" alt="Foto de perfil de contribuidor"></a>&nbsp;&nbsp;
+  <a href="https://github.com/HayatoG/iss_pc/graphs/contributors"><img src="https://github.com/identicons/guilherme-oliveira.png" width="72" alt="Avatar de contribuidor"></a>&nbsp;&nbsp;
+  <a href="https://github.com/batuhankiskac"><img src="https://github.com/batuhankiskac.png" width="72" alt="Foto de perfil de contribuidor"></a>&nbsp;&nbsp;
+  <a href="https://github.com/sapoguruoficial-cmd"><img src="https://github.com/sapoguruoficial-cmd.png" width="72" alt="Foto de perfil de contribuidor"></a>
+</p>
+
 ## Novidades
 
-- **Launcher novo (Qt Quick), agora o padrão:** com 8 telas (Jogar, Gráficos, Controles, Correções, Saves e dados, Guias de controle, Suporte, Atualizações), interface em português e inglês e o idioma do jogo seguindo o do sistema por padrão. O launcher antigo (Tk) continua no pacote como **inFAMOUS Second Son (classic)**, de reserva. Veja [O launcher](#o-launcher).
+- **Launcher novo (Qt Quick), agora o padrão:** com 10 telas, incluindo **Mods / Cheats** e **Avançado**, interface em português e inglês e o idioma do jogo seguindo o do sistema por padrão. O launcher antigo (Tk) continua no pacote como **inFAMOUS Second Son (classic)**, de reserva. Veja [O launcher](#o-launcher).
 - **Saves e dados:** pasta de dados configurável, backup antes de cada partida, exportar/importar `.zip`, duplicar e excluir saves, e a busca de saves de outras instalações. Resolve o "perdi meu save depois de atualizar". Veja [Saves e dados](#saves-e-dados).
 - **Faróis piscando e brilho que atravessava personagens: corrigido.** O contador de oclusão que o jogo lê para saber quanto de uma luz está visível era falso; o novo modo 3 (o padrão) devolve contagem zero, e isso corrigiu o problema, **confirmado no Windows e no Linux**. Veja [Luzes e oclusão](#luzes-e-oclusão).
 - **Correções experimentais BP01–BP12:** doze correções trazidas de outros ports de PS4 e do shadPS4, com chave individual, perfil Recomendado e o "Como a release anterior" para comparar. Veja [Correções experimentais](#correções-experimentais).
@@ -80,7 +100,7 @@ Por **HayatoG** · YouTube [@hayatog-dev](https://www.youtube.com/@hayatog-dev) 
 | Launcher | ✅ Qt Quick (padrão) com o Tk de reserva; português e inglês |
 | Saves e dados | ✅ Pasta configurável, backup, exportar/importar |
 | Mouse (câmera e touchpad) | 🧪 Implementado, ainda pouco testado em jogo |
-| Correções experimentais (BP01–BP12) | 🧪 As de padrão ligado vêm no perfil Recomendado; BP06–BP09 (desligadas) são experimentais |
+| Correções experimentais (BP01–BP12) | 🧪 As de padrão ligado vêm no perfil Recomendado; BP07 e BP09 (desligadas) são experimentais; BP06 e BP08 ligadas por padrão |
 | Linux | ✅ Testado (Nobara/Fedora 44) |
 | Windows | 🧪 Testado por jogadores (a correção de luzes foi confirmada); crash conhecido em RX 580/Polaris, veja [Problemas conhecidos](#problemas-conhecidos) |
 
@@ -90,7 +110,7 @@ Por **HayatoG** · YouTube [@hayatog-dev](https://www.youtube.com/@hayatog-dev) 
 
 ## Download
 
-A [**última versão**](https://github.com/HayatoG/iss_pc/releases/latest) é gerada pelo GitHub Actions a cada mudança; as anteriores ficam em [Releases](https://github.com/HayatoG/iss_pc/releases) como histórico:
+A [**última versão**](https://github.com/HayatoG/iss_pc/releases/latest) é publicada quando o mantenedor decide reunir as mudanças em um pacote. PRs são compilados e testados; aprovações e merges não disparam builds. Na `main`, Linux e Windows só compilam na execução manual autorizada para release. As anteriores ficam em [Releases](https://github.com/HayatoG/iss_pc/releases) como histórico. Veja [como publicar](docs/RELEASES.md):
 
 - **Linux x86-64** (glibc 2.39+: Ubuntu 24.04, Fedora 40, SteamOS 3.6 ou mais novos): `infamous-linux-x86_64.tar.gz`
 - **Windows 10 (1903 ou mais novo) / 11, 64 bits**: `infamous-windows-x86_64.zip`
@@ -137,11 +157,13 @@ O launcher é o programa que abre ao executar **inFAMOUS Second Son**. O novo (Q
 | **Saves e dados** | pasta de dados, lista de saves, backups, exportar/importar `.zip`; veja [Saves e dados](#saves-e-dados) |
 | **Guias de controle** | imagens Xbox, Switch Pro e 8BitDo (português e inglês): salvar, copiar, abrir a pasta |
 | **Suporte** | problemas conhecidos para a sua GPU, links e o relatório de problema; veja [Logs e relatórios](#logs-e-relatórios) |
+| **Mods / Cheats** | ativa cheats XML e o patch opcional para pular o vídeo inicial de logos (não pula cutscenes da história) |
+| **Avançado** | configurações adicionais do launcher e do port |
 | **Atualizações** | mostra a versão instalada e verifica a última release (veja abaixo) |
 
 **Idioma da interface:** português (Brasil) ou inglês (EUA), que o launcher escolhe pelo idioma do sistema e dá para trocar. Quando você escolhe um, o launcher passa a escolha ao jogo (`ISS_UI_LANG`) para o overlay.
 
-**Idioma do jogo:** a primeira opção é **Automático (idioma do sistema)**, o padrão, e depois vêm 6 idiomas: English (1), Português (Brasil) (17), Español (Latinoamérica) (20), Français (Canada) (22), Türkçe (19) e Русский (8). Português vira pt-BR, espanhol vira es-LA, francês vira fr-CA, turco e russo ficam como são, e o resto vira inglês. A escolha vale na próxima partida e vira `ISS_LANGUAGE` (um `ISS_LANGUAGE` definido por você vence). **Só funciona se os arquivos do seu jogo tiverem o idioma:** turco e russo, por exemplo, só aparecem se o seu dump tiver esses idiomas. É separado do idioma da interface.
+**Idioma do jogo:** a primeira opção é **Automático (idioma do sistema)**, o padrão, e depois vêm os idiomas que o `sce_sys/playgo-chunk.dat` do seu dump marca, entre os 30 do PS4 (inglês dos EUA e do Reino Unido, português do Brasil e de Portugal, espanhol latino e da Espanha, francês e francês do Canadá, alemão, italiano, holandês, polonês, turco, russo, japonês, coreano, chinês e outros); sem esse arquivo (dumps por FTP) vêm os 6 do CUSA00223: English (1), Português (Brasil) (17), Español (Latinoamérica) (20), Français (Canada) (22), Türkçe (19) e Русский (8). O automático segue o idioma e a região do sistema (es_ES vira espanhol da Espanha, es_MX vira latino, pt_PT vira português de Portugal) e, se o jogo não tiver esse idioma, usa a variante mais próxima (espanhol ↔ latino, português ↔ brasileiro...), senão o inglês. A escolha vale na próxima partida e vira `ISS_LANGUAGE` (um `ISS_LANGUAGE` definido por você vence). **Só funciona se os arquivos do seu jogo tiverem o idioma:** turco e russo, por exemplo, só aparecem se o seu dump tiver esses idiomas. É separado do idioma da interface.
 
 **Atualizações:** a tela **Atualizações** faz uma única consulta HTTPS à última release no GitHub (nada seu é enviado), mostra as notas no idioma da interface e o botão **Baixar** só abre a página da release. **Ela não baixa nem instala nada: um atualizador automático de verdade ainda não existe.** "Verificar ao abrir" vem desligado.
 
@@ -168,9 +190,9 @@ A tela **Correções** do launcher (e o botão **Correções experimentais…** 
 | BP03 | mantém o EXEC depois de um desvio divergente vazio | shadPS4 c34ca21f | ligado | reinicia, recompila shaders |
 | BP04 | recíproco/raiz/log sem clamp, como o hardware | shadPS4 #5346 | ligado | reinicia, recompila shaders |
 | BP05 | saturate trata NaN como a GPU (vira 0) | shadPS4 #5257 | ligado | reinicia, recompila shaders |
-| BP06 | reconvergência máxima nos shaders de compute | port nativo de Shadow of the Colossus | **desligado** (experimental) | reinicia, recompila shaders |
+| BP06 | reconvergência máxima nos shaders de compute | port nativo de Shadow of the Colossus | **ligado** | reinicia, recompila shaders |
 | BP07 | compilação assíncrona sem pular draws pequenos ou indiretos | bbport (bloodborne_pc) | **desligado** (experimental) | no jogo |
-| BP08 | guarda o cache de pipelines do driver entre partidas | Mrsuss, 0xCydral (bloodborne_pc) | **desligado** (experimental) | reinicia |
+| BP08 | guarda o cache de pipelines do driver entre partidas | Mrsuss, 0xCydral (bloodborne_pc) | **ligado** (desde 16/10) | reinicia |
 | BP09 | toda imagem 1D vira 2D de altura 1 | CTR | **desligado** (experimental) | reinicia, recompila shaders |
 | BP10 | barreiras para buffers de vértice, índice e indiretos | shadPS4 #5262 | ligado | no jogo |
 | BP11 | `firstInstance` contado uma vez nos draws indiretos | shadPS4 #5348 | ligado | reinicia, recompila shaders |
@@ -179,7 +201,7 @@ A tela **Correções** do launcher (e o botão **Correções experimentais…** 
 - **Como a release anterior:** `TLG_BACKPORTS=0` (ou o botão do launcher) desliga todas as BP que vêm ligadas, para comparar com a versão sem elas; um `TLG_BPnn` individual ainda vence. Na primeira abertura depois de atualizar, uma mensagem única explica isso. Se uma cena piorar, teste primeiro assim e depois ligue uma a uma.
 - **Voltar ao recomendado** apaga todas as suas escolhas. Só o que difere do padrão é gravado.
 - **Chaves de diagnóstico (A/B):** `ISS_WQM`, `ISS_LDS_SMALL`, `ISS_LDS_MULTI`, `ISS_LDS_READLANE`, `ISS_LANE_DIVERGENCE`, `ISS_RFL_ALL`, `ISS_BLOCK1D`, `ISS_BC_TINY`, `ISS_NO_MSAA`, `ISS_BACKGROUND_WARMUP`, `ISS_PIPELINE_BINARIES` (ainda derruba o jogo no driver NVIDIA 595) e o seletor de oclusão (`ISS_OCCLUSION_MODE`); `0` desliga, `1` liga. Servem para descobrir qual mudança causa um problema.
-- O BP08 (cache de pipelines do driver em disco) é experimental e vem desligado; o cache de pipelines em disco "de verdade" contra os engasgos ainda está no [roadmap](docs/ROADMAP.md).
+- O BP08 (cache de pipelines do driver em disco) vem ligado desde 16/10: a criação de pipelines fica rápida o bastante para nenhum desenho ser pulado (os flashes cinza de um quadro). O arquivo é salvo só quando há pipelines novos e não passa de 1 GB (`ISS_DRIVER_CACHE_MAX_MB`; apagar o arquivo recomeça). O resto do engasgo de shader está no [roadmap](docs/ROADMAP.md).
 - Tabela completa, com as chaves do `tlg.ini` e as opções do menu Insert: [`docs/EXPERIMENTAL_FIXES.md`](docs/EXPERIMENTAL_FIXES.md).
 
 ## Luzes e oclusão
@@ -316,7 +338,7 @@ O jogo pede o sensor de movimento e o touchpad em várias cenas: grafite, absorv
 
 **Tela congelada:** se o jogo passa 10 s sem mostrar um quadro novo, o log (`out/last_run.log`) ganha um bloco `FREEZE: no frame for 10 s; threads:` com cada thread do jogo, o que ela está esperando (mutex, semáforo, fila de eventos, leitura de arquivo, GPU...) e onde está no código. O jogo continua rodando, e o relatório só se repete depois que os quadros voltarem e pararem de novo. Mande esse log junto com o relato. `ISS_FREEZE_REPORT_SECONDS=<s>` muda o tempo (`0` desliga).
 
-**Placas AMD no Windows (RX 580): texturas BC minúsculas.** O driver da AMD no Windows (`amdvlk64.dll`) quebra logo depois dos logos (`Fault: write access to 0 at amdvlk64.dll+0xebbbb`, #16/#31/#49) na primeira textura comprimida BC 1D do jogo (512x1), seja ela criada 1D ou 2D. No driver da AMD o port decodifica na CPU as texturas BC1–BC5 que são 1D ou menores que um bloco de 4x4 e manda ao driver imagens comuns (RGBA8, R8 ou RG8, mantendo sRGB e snorm); o log mostra `GPU: tiny block-compressed textures ...` dizendo o modo. `ISS_BC_TINY=0` desliga e `ISS_BC_TINY=1` liga em qualquer placa (teste).
+**Placas AMD no Windows (RX 580): compatibilidade experimental.** Há relatos de crash depois dos logos em `amdvlk64.dll+0xebbbb` (#31, #49). A investigação do [PR #232](https://github.com/HayatoG/iss_pc/pull/232) encontrou um lote de 9.217 barreiras, incluindo 9.216 para uma única imagem de 1.536 camadas e 6 mips; o log não prova que a chamada foi a causa do crash. Dois jogadores relataram que um build de teste passou desse ponto. Em **Gráficos → Imagem**, ligue **Compatibilidade RX580**, ou escolha **Compatibilidade RX 580 (experimental)** para aplicar também as escolhas recomendadas para AMD. O teste fica desligado por padrão e exige reiniciar o jogo; ainda precisa de validação nesta versão. A opção também aparece em **Avançado → Contornos de imagem**. Pelo terminal: `ISS_BARRIER_MERGE=1` liga a junção de barreiras vizinhas equivalentes; `0` desliga. Valores definidos fora do launcher têm prioridade. O contorno anterior para texturas BC minúsculas continua disponível (`ISS_BC_TINY=0/1`), mas não é uma correção confirmada desse crash. Para comparação de diagnóstico, **Avançado** expõe `ISS_EXPLICIT_RANGE` (padrão `1`, contagens explícitas de mips/camadas) e `ISS_BARRIER_SPLIT` (padrão `0`; `1` divide por mip, `2` por mip e camada; exige intervalos explícitos). Essas experiências isoladas não resolveram o crash nos testes do autor. Crédito: @intemerated pela junção e investigação; @Andretuta pela integração inicial no launcher.
 
 ## Logs e relatórios
 
@@ -332,7 +354,7 @@ A tela **Suporte** do launcher mostra os que casam com a sua GPU (uma tabela loc
 
 | Situação | O que acontece | O que fazer |
 |---|---|---|
-| **AMD RX 580 / Polaris no Windows** (#31, #49, #59, #65, #67, #81) | crash logo depois dos logos em `amdvlk64.dll+0xebbbb` | **causa ainda em investigação.** Atualize o driver da AMD e teste `ISS_BP09=1` (BP09, imagens 1D como 2D); mande o log |
+| **AMD RX 580 / Polaris no Windows** (#31, #49, #59, #65, #67, #81) | crash logo depois dos logos em `amdvlk64.dll+0xebbbb` | **correção experimental disponível.** Teste o perfil **Compatibilidade RX 580 (experimental)** no launcher, reinicie o jogo e mande o log; ainda sem garantia de correção |
 | **GPU com 4 GB de VRAM** (#72, #75) | a memória de textura estoura; FPS muito baixo | baixe a resolução (tela Gráficos) e mantenha o orçamento de VRAM abaixo da memória da placa. Atenção: **"Precisão da GPU: Rápido" escurece a imagem** |
 | **NVIDIA Quadro / Maxwell** (#70) | pode estar abaixo do mínimo do port; tela preta ou jogo que não abre | conte o que você viu; ainda sem solução |
 | **CPU sem SSE4A ou F16C** (Intel, Sandy Bridge...) | o port emula essas instruções na partida | é automático; veja [Processadores Intel](#sensor-de-movimento-e-touchpad) |
@@ -347,6 +369,8 @@ git clone --recursive https://github.com/HayatoG/iss_pc.git && cd iss_pc
 cd port && ISS_LTO=OFF bash build.sh   # Linux: SDL3, Vulkan, FFmpeg, FreeType, Boost, fmt, Zydis, glslang
 cd .. && ./infamous_launcher_qt.sh     # launcher Qt (precisa do PySide6); ./infamous_launcher.sh é o Tk; ./run_infamous.sh pelo terminal
 ```
+
+Um clone compila sem otimização guiada por perfil (PGO): o perfil (`port/pgo/*.gcda`) não está no repositório e os pacotes das releases também são compilados sem ele, então um build local e um pacote devem render igual. `ISS_PGO=generate` gera um binário instrumentado que grava o perfil enquanto você joga, e o build seguinte o usa.
 
 No Windows, o build roda no MSYS2 CLANG64 ([`port/packaging/windows/README.md`](port/packaging/windows/README.md)). O workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) mostra o processo completo nas duas plataformas.
 
@@ -393,7 +417,7 @@ The screenshots are at the top of this page.
 
 ## What's new
 
-- **New launcher (Qt Quick), now the default:** 8 screens (Play, Graphics, Controls, Fixes, Saves & data, Controller guides, Support, Updates), the interface in Portuguese and English, and the game language following the system's by default. The old launcher (Tk) stays in the package as **inFAMOUS Second Son (classic)**, as a fallback. See [The launcher](#the-launcher).
+- **New launcher (Qt Quick), now the default:** 10 screens, including **Mods / Cheats** and **Advanced**, the interface in Portuguese and English, and the game language following the system's by default. The old launcher (Tk) stays in the package as **inFAMOUS Second Son (classic)**, as a fallback. See [The launcher](#the-launcher).
 - **Saves and data:** a configurable data folder, a backup before every play session, `.zip` export/import, duplicate and delete saves, and a search for saves from other installs. It fixes the "I lost my save after updating" problem. See [Saves and data](#saves-and-data).
 - **Flickering headlights and glare that showed through characters: fixed.** The occlusion counter the game reads to know how much of a light is visible was a fake; the new mode 3 (the default) answers with zero counts, and that fixed the problem, **confirmed on Windows and on Linux**. See [Lights and occlusion](#lights-and-occlusion).
 - **Experimental fixes BP01–BP12:** twelve fixes brought from other PS4 ports and from shadPS4, each with its own switch, a Recommended profile and a "Like the previous release" button to compare. See [Experimental fixes](#experimental-fixes).
@@ -441,7 +465,7 @@ The screenshots are at the top of this page.
 | Launcher | ✅ Qt Quick (default) with the Tk one as a fallback; Portuguese and English |
 | Saves and data | ✅ Configurable folder, backup, export/import |
 | Mouse (camera and touchpad) | 🧪 Implemented, not yet tested much in game |
-| Experimental fixes (BP01–BP12) | 🧪 The ones on by default come in the Recommended profile; BP06–BP09 (off) are experimental |
+| Experimental fixes (BP01–BP12) | 🧪 The ones on by default come in the Recommended profile; BP07 and BP09 (off) are experimental; BP06 and BP08 are on by default |
 | Linux | ✅ Tested (Nobara/Fedora 44) |
 | Windows | 🧪 Tested by players (the lights fix was confirmed); known crash on RX 580/Polaris, see [Known problems](#known-problems) |
 
@@ -451,7 +475,7 @@ The screenshots are at the top of this page.
 
 ## Download
 
-The [**latest release**](https://github.com/HayatoG/iss_pc/releases/latest) is built by GitHub Actions on every change; older ones stay under [Releases](https://github.com/HayatoG/iss_pc/releases) as history:
+The [**latest release**](https://github.com/HayatoG/iss_pc/releases/latest) is published when the maintainer chooses to bundle the accumulated changes. PRs build and test; approvals and merges do not trigger builds. On `main`, Linux and Windows build only through an authorized manual release run. Older ones stay under [Releases](https://github.com/HayatoG/iss_pc/releases) as history. See [how to publish](docs/RELEASES.md):
 
 - **Linux x86-64** (glibc 2.39+: Ubuntu 24.04, Fedora 40, SteamOS 3.6 or newer): `infamous-linux-x86_64.tar.gz`
 - **Windows 10 (1903 or newer) / 11, 64-bit**: `infamous-windows-x86_64.zip`
@@ -498,11 +522,13 @@ The launcher is the program that opens when you run **inFAMOUS Second Son**. The
 | **Saves & data** | data folder, list of saves, backups, `.zip` export/import; see [Saves and data](#saves-and-data) |
 | **Controller guides** | Xbox, Switch Pro and 8BitDo images (Portuguese and English): save, copy, open the folder |
 | **Support** | known problems for your GPU, links and the problem report; see [Logs and reports](#logs-and-reports) |
+| **Mods / Cheats** | enables cheat XML files and the optional boot logo movie skip (story cutscenes remain unchanged) |
+| **Advanced** | additional launcher and port settings |
 | **Updates** | shows the installed version and checks the latest release (see below) |
 
 **Interface language:** Portuguese (Brazil) or English (US), which the launcher picks from the system language and you can change. When you pick one, the launcher passes it to the game (`ISS_UI_LANG`) for the overlay.
 
-**Game language:** the first option is **Automatic (system language)**, the default, followed by 6 languages: English (1), Português (Brasil) (17), Español (Latinoamérica) (20), Français (Canada) (22), Türkçe (19) and Русский (8). Portuguese becomes pt-BR, Spanish becomes es-LA, French becomes fr-CA, Turkish and Russian stay as they are, and anything else becomes English. The choice applies on the next start and becomes `ISS_LANGUAGE` (an `ISS_LANGUAGE` you set yourself wins). **It only works if your game files have that language:** Turkish and Russian, for example, only show up if your dump has them. It is separate from the interface language.
+**Game language:** the first option is **Automatic (system language)**, the default, followed by the languages your dump's `sce_sys/playgo-chunk.dat` lists, out of the PS4's 30 (US and UK English, Brazilian and European Portuguese, Latin American and Spain Spanish, French and Canadian French, German, Italian, Dutch, Polish, Turkish, Russian, Japanese, Korean, Chinese and more); without that file (FTP dumps) the 6 of CUSA00223: English (1), Português (Brasil) (17), Español (Latinoamérica) (20), Français (Canada) (22), Türkçe (19) and Русский (8). Automatic follows the system's language and region (es_ES is Spain Spanish, es_MX Latin American, pt_PT European Portuguese) and, when the game lacks that language, the closest variant (Spain/Latin American Spanish, European/Brazilian Portuguese...), else English. The choice applies on the next start and becomes `ISS_LANGUAGE` (an `ISS_LANGUAGE` you set yourself wins). **It only works if your game files have that language:** Turkish and Russian, for example, only show up if your dump has them. It is separate from the interface language.
 
 **Updates:** the **Updates** screen makes a single HTTPS query for the latest release on GitHub (nothing of yours is sent), shows the notes in the interface language, and the **Download** button only opens the release page. **It does not download or install anything: a real automatic updater does not exist yet.** "Check on open" is off by default.
 
@@ -529,9 +555,9 @@ The launcher's **Fixes** screen (and the **Experimental fixes…** button of the
 | BP03 | keeps EXEC after an empty divergent branch | shadPS4 c34ca21f | on | restarts, recompiles shaders |
 | BP04 | reciprocal/root/log without clamp, like the hardware | shadPS4 #5346 | on | restarts, recompiles shaders |
 | BP05 | saturate treats NaN like the GPU (becomes 0) | shadPS4 #5257 | on | restarts, recompiles shaders |
-| BP06 | maximal reconvergence in compute shaders | native Shadow of the Colossus port | **off** (experimental) | restarts, recompiles shaders |
+| BP06 | maximal reconvergence in compute shaders | native Shadow of the Colossus port | **on** | restarts, recompiles shaders |
 | BP07 | async compile never skips small or indirect draws | bbport (bloodborne_pc) | **off** (experimental) | in game |
-| BP08 | keeps the driver pipeline cache between sessions | Mrsuss, 0xCydral (bloodborne_pc) | **off** (experimental) | restarts |
+| BP08 | keeps the driver pipeline cache between sessions | Mrsuss, 0xCydral (bloodborne_pc) | **on** (since 2026-10-16) | restarts |
 | BP09 | every 1D image becomes 2D with height 1 | CTR | **off** (experimental) | restarts, recompiles shaders |
 | BP10 | barriers for vertex, index and indirect buffers | shadPS4 #5262 | on | in game |
 | BP11 | `firstInstance` counted once in indirect draws | shadPS4 #5348 | on | restarts, recompiles shaders |
@@ -540,7 +566,7 @@ The launcher's **Fixes** screen (and the **Experimental fixes…** button of the
 - **Like the previous release:** `TLG_BACKPORTS=0` (or the launcher button) turns off every BP that is on by default, to compare with the version without them; an individual `TLG_BPnn` still wins. On the first start after updating, a one-time message explains this. If a scene gets worse, test this way first, then turn them back on one by one.
 - **Back to recommended** clears all your choices. Only what differs from the default is written.
 - **Diagnostic (A/B) switches:** `ISS_WQM`, `ISS_LDS_SMALL`, `ISS_LDS_MULTI`, `ISS_LDS_READLANE`, `ISS_LANE_DIVERGENCE`, `ISS_RFL_ALL`, `ISS_BLOCK1D`, `ISS_BC_TINY`, `ISS_NO_MSAA`, `ISS_BACKGROUND_WARMUP`, `ISS_PIPELINE_BINARIES` (still crashes the game on the NVIDIA 595 driver) and the occlusion selector (`ISS_OCCLUSION_MODE`); `0` turns off, `1` turns on. They exist to find which change causes a problem.
-- BP08 (the on-disk driver pipeline cache) is experimental and off; a "real" on-disk pipeline cache against stutter is still on the [roadmap](docs/ROADMAP.md).
+- BP08 (the on-disk driver pipeline cache) is on since 2026-10-16: pipeline creation gets fast enough that no draw is skipped (the grey one-frame flashes). The file is saved only when there are new pipelines and never grows past 1 GB (`ISS_DRIVER_CACHE_MAX_MB`; deleting it starts over). The rest of the shader stutter is on the [roadmap](docs/ROADMAP.md).
 - Full table, with the `tlg.ini` keys and the Insert menu options: [`docs/EXPERIMENTAL_FIXES.md`](docs/EXPERIMENTAL_FIXES.md).
 
 ## Lights and occlusion
@@ -677,7 +703,7 @@ The game asks for the motion sensor and the touchpad in many scenes: graffiti, a
 
 **Frozen screen:** if the game shows no new frame for 10 s, the log (`out/last_run.log`) gets a `FREEZE: no frame for 10 s; threads:` block with every thread of the game, what it is waiting on (mutex, semaphore, event queue, file read, GPU...) and where it is in the code. The game keeps running, and the report only repeats after frames resume and stop again. Send that log with the report. `ISS_FREEZE_REPORT_SECONDS=<s>` changes the time (`0` turns it off).
 
-**AMD cards on Windows (RX 580): tiny BC textures.** AMD's Windows driver (`amdvlk64.dll`) crashes right after the logos (`Fault: write access to 0 at amdvlk64.dll+0xebbbb`, #16/#31/#49) on the game's first BC-compressed 1D texture (512x1), whether it is created 1D or 2D. On AMD's driver the port decodes BC1–BC5 textures that are 1D or smaller than a 4x4 block on the CPU and gives the driver plain images (RGBA8, R8 or RG8, sRGB and snorm kept); the log line `GPU: tiny block-compressed textures ...` says which mode is on. `ISS_BC_TINY=0` turns it off and `ISS_BC_TINY=1` turns it on on any GPU (testing).
+**AMD cards on Windows (RX 580): experimental compatibility.** Players have reported crashes after the logos in `amdvlk64.dll+0xebbbb` (#31, #49). The [PR #232](https://github.com/HayatoG/iss_pc/pull/232) investigation found a batch of 9,217 barriers, including 9,216 for one image with 1,536 layers and 6 mips; the log does not prove that call caused the crash. Two players reported getting past that point with a test build. Enable **RX580 compatibility** in **Graphics → Image**, or choose **RX 580 compatibility (experimental)** to also apply the recommended AMD settings. This test defaults to off, requires a game restart and still needs validation in this version. The same switch appears in **Advanced → Image workarounds**. From a terminal: `ISS_BARRIER_MERGE=1` merges equivalent adjacent image barriers; `0` disables it. Values set outside the launcher take precedence. The earlier tiny-BC texture workaround remains available (`ISS_BC_TINY=0/1`), but is not a confirmed fix for this crash. For diagnostic comparisons, **Advanced** exposes `ISS_EXPLICIT_RANGE` (default `1`, explicit mip/layer counts) and `ISS_BARRIER_SPLIT` (default `0`; `1` splits per mip, `2` per mip and layer; requires explicit ranges). These experiments alone did not resolve the crash in the author's tests. Credit: @intemerated for merging and investigation; @Andretuta for the initial launcher integration.
 
 ## Logs and reports
 
@@ -693,7 +719,7 @@ The launcher's **Support** screen shows the ones that match your GPU (a local ta
 
 | Situation | What happens | What to do |
 |---|---|---|
-| **AMD RX 580 / Polaris on Windows** (#31, #49, #59, #65, #67, #81) | crash right after the logos in `amdvlk64.dll+0xebbbb` | **cause still under investigation.** Update the AMD driver and try `ISS_BP09=1` (BP09, 1D images as 2D); send the log |
+| **AMD RX 580 / Polaris on Windows** (#31, #49, #59, #65, #67, #81) | crash right after the logos in `amdvlk64.dll+0xebbbb` | **experimental workaround available.** Try the **RX 580 compatibility (experimental)** launcher preset, restart the game and send the log; a fix is not guaranteed |
 | **GPU with 4 GB of VRAM** (#72, #75) | texture memory runs out; very low FPS | lower the resolution (Graphics screen) and keep the VRAM budget below your card's memory. Note: **"GPU accuracy: Fast" darkens the image** |
 | **NVIDIA Quadro / Maxwell** (#70) | may be below the port's minimum; black screen or the game does not open | tell us what you saw; no fix yet |
 | **CPU without SSE4A or F16C** (Intel, Sandy Bridge...) | the port emulates those instructions at start | automatic; see [Intel CPUs](#motion-sensor-and-touchpad) |
@@ -708,6 +734,8 @@ git clone --recursive https://github.com/HayatoG/iss_pc.git && cd iss_pc
 cd port && ISS_LTO=OFF bash build.sh   # Linux: SDL3, Vulkan, FFmpeg, FreeType, Boost, fmt, Zydis, glslang
 cd .. && ./infamous_launcher_qt.sh     # Qt launcher (needs PySide6); ./infamous_launcher.sh is the Tk one; ./run_infamous.sh from a terminal
 ```
+
+A clone builds without profile-guided optimization (PGO): the profile (`port/pgo/*.gcda`) is not in the tree, and the release packages are built without it as well, so a local build and a package should perform alike. `ISS_PGO=generate` builds an instrumented binary that writes the profile while you play, and the next build uses it.
 
 On Windows, the build runs in MSYS2 CLANG64 ([`port/packaging/windows/README.md`](port/packaging/windows/README.md)). The workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) shows the full process on both platforms.
 
@@ -735,3 +763,9 @@ Code base: [tlg_pc](https://github.com/HayatoG/tlg_pc), [gr2_pc](https://github.
 - The players who reported problems in the [issues](https://github.com/HayatoG/iss_pc/issues), with logs that changed the port's course: jacckkss (#50, flickering lights and smoke), heyzerr (#51, #65, #67, CPUs without F16C and the RX 580), Andrade2244 (#29), MrRobot11214 (#31), fghacksr (#49), AngelHomura (#59) and aledieb93-svg (#81) (crashes on the RX 580 and on Windows), ViniSnapeS (#72) and kudetgaming-art (#75) (video memory), summer882 (#71), manymanyyyd-afk (#63) and Kpopping (#73) (Turkish and Russian), mahmoudmahran2112-crypto (#70, Quadro/Maxwell), Milicksp (#16), gsev3333 (#41) and everyone else who opened an issue or tested a build.
 
 This project is not affiliated with Sony Interactive Entertainment or Sucker Punch Productions. inFAMOUS is a trademark of Sony Interactive Entertainment. No game code, files or art are distributed here. The icon is original artwork made for this project.
+
+## Apoie o desenvolvimento / Support development
+
+Se quiser apoiar os ports, [pague um café pelo Buy Me a Coffee](https://buymeacoffee.com/hayatog). O apoio é opcional; os ports continuam gratuitos.
+
+If you would like to support the ports, [buy me a coffee](https://buymeacoffee.com/hayatog). Support is optional; the ports remain free.

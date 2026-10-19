@@ -266,7 +266,7 @@ class BackendTests(unittest.TestCase):
 
     def test_game_language_list_is_auto_then_game_languages_in_order(self):
         backend, _ = self.make()
-        self.assertEqual(['auto'] + list(logic.tlg_run.GAME_LANGUAGES), [o['value'] for o in backend.gameLanguageOptions])
+        self.assertEqual(['auto'] + list(logic.tlg_run._DEFAULT_LANGUAGES), [o['value'] for o in backend.gameLanguageOptions])
         self.assertEqual(7, len(backend.gameLanguageOptions))
         self.assertEqual('Automático (idioma do sistema)', backend.gameLanguageOptions[0]['label'])
         self.assertEqual(['English', 'Português (Brasil)', 'Español (Latinoamérica)', 'Français (Canada)',

@@ -71,6 +71,7 @@ while ((${#queue[@]})); do
 done
 echo "Packaged $(find "$dest/out" -maxdepth 1 -iname '*.dll' | wc -l) DLLs from /clang64/bin"
 cp -r scripts "$dest/"
+cp -r patches "$dest/"
 # The shader list generator (scripts/build_jobs.py imports it from ../tools): plain files, like scripts/.
 mkdir -p "$dest/tools"
 cp -r tools/xpps "$dest/tools/"
@@ -81,6 +82,9 @@ if [[ -n ${GITHUB_SHA:-} ]]; then printf 'v%s-%s\n' "$(date -u +%Y.%m.%d)" "${GI
 printf '%s\r\n' 'Este jogo não precisa de módulos do firmware do console: a pasta fica vazia.' \
     'This game needs no console firmware modules: leave this folder empty.' > "$dest/system_lib/LEIA-ME.txt"
 bash packaging/check_package.sh "$dest"
+# Only these hashed package files may be replaced by the in-place updater.
+if [[ ! -f "$dest/VERSION" ]]; then git rev-parse --short HEAD > "$dest/VERSION"; fi
+out/pyenv/Scripts/python.exe launcher/update_install.py --manifest "$dest" "$(tr -d '\r\n' < "$dest/VERSION")"
 mkdir -p dist
 rm -f "dist/$name.zip"
 (cd out/stage && powershell -NoProfile -Command "Compress-Archive -Path '$name' -DestinationPath '../../dist/$name.zip'")

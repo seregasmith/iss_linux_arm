@@ -195,6 +195,13 @@ class BackupAndDeleteTests(Base):
         self.assertTrue(sm.game_running(lambda: ['TLG-PROBE.EXE']))
         self.assertFalse(sm.game_running(lambda: ['bash', 'firefox']))
 
+    def test_process_names_windows_no_stdout(self):
+        """tasklist blocked or intercepted (antivirus, sandboxing): stdout comes back None rather
+        than raising, and the caller must not crash on it."""
+        with mock.patch.object(sm.os, 'name', 'nt'), \
+             mock.patch.object(sm.subprocess, 'run', return_value=mock.Mock(stdout=None)):
+            self.assertEqual([], sm._process_names())
+
 
 class RestoreTests(Base):
     def test_restore_brings_back_the_backup_and_backs_up_what_it_replaces(self):

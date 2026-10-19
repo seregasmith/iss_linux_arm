@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Quick bring-up check without a window: prepares the image and runs the CPU side only
-# (--cpu-only, no GPU) for N seconds. Usage: scripts/infamous_quick.sh [seconds=20]; env passes through.
+# (--cpu-only, no GPU) for N seconds. Usage: scripts/infamous_quick.sh [seconds=20]; env passes through
+# (ISS_GAME_DIR: the game folder; GAME_LOCK: the lock shared with scripts/infamous_run.sh).
 set -uo pipefail
-root=$(cd -- "$(dirname -- "$0")/.." && pwd); port=$root/port; dump=$root/game/CUSA00223
-lock=${GAME_LOCK:-/tmp/claude-1000/-home-hayatog-decomp/79f27d1d-d3f5-4a2e-a5f3-511e01385ae2/scratchpad/game.lock}
+root=$(cd -- "$(dirname -- "$0")/.." && pwd); port=$root/port; dump=${ISS_GAME_DIR:-$root/game/CUSA00223}
+lock=${GAME_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/infamous-game.lock}
 if [[ -z ${INFAMOUS_LOCKED:-} ]]; then touch "$lock"; exec env INFAMOUS_LOCKED=1 flock "$lock" "$0" "$@"; fi
 (cd "$port/scripts" && python3 prepare.py "$dump" --out ../out >/dev/null &&
  python3 link_modules.py "$dump" --out ../out --modules libc.prx libSceFios2.prx >/dev/null &&

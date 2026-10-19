@@ -47,6 +47,7 @@ ldd out/tlg-probe out/gpu/libtlggpu.so | awk '/=> \// {print $1, $3}' | sort -u 
 done
 # SDL3 loads its video/audio backends at run time from the player's system: nothing else to copy.
 cp -r scripts "$dest/"
+cp -r patches "$dest/"
 # The shader list generator (scripts/build_jobs.py imports it from ../tools): plain files, like scripts/.
 mkdir -p "$dest/tools"
 cp -r tools/xpps "$dest/tools/"

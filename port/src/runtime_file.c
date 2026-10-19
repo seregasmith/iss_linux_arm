@@ -60,6 +60,7 @@ typedef struct { char guest[64]; char host[512]; } Mount;
 static File files[MAX_FILES];
 static Mount mounts[MAX_MOUNTS];
 static size_t mount_count, opens, reads, writes, missing;
+static size_t bounce_reads, direct_reads; /* TLG_FILE_DIRECT: which path each chunk of a read took */
 static uint64_t bytes_read;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 
@@ -358,9 +359,28 @@ static void log_io_problem(const char *what,const char *detail,int64_t n,int err
  * with precise readbacks: 'gave up after 64 retries' on streaming reads, 2026-10-15). Read into
  * a host buffer instead and copy in user mode, where every fault goes through the handler. */
 enum { BOUNCE_BYTES=4u<<20 };
+/* TLG_FILE_DIRECT=1: read straight into the guest buffer first (one copy instead of two, which
+ * the large streaming reads care about) and fall back to the bounce buffer as soon as the kernel
+ * copy stops early (EFAULT: the GPU tracker protected a page again) or comes back short of what
+ * was asked for. Default off: the bounce path is the one that survived precise readbacks. */
+static int file_direct(void) {
+    static int value=-1;
+    if (value<0) { const char *e=getenv("TLG_FILE_DIRECT"); value=e && e[0]=='1'; }
+    return value;
+}
+/* Straight into the guest buffer; EFAULT here is the GPU tracker's page protection. The pages
+ * are touched first only on the out-of-memory path (as before): with TLG_FILE_DIRECT the touch
+ * would turn every read into tracked CPU writes, and an EFAULT moves the rest to the bounce. */
+static ssize_t direct_read(int h,unsigned char *at,uint64_t size,int64_t offset,int touch) {
+    if (touch) touch_for_write(at,size);
+    ssize_t n=offset<0 ? host_read(h,at,size) : pread(h,at,size,offset);
+    if (n>0) __atomic_add_fetch(&direct_reads,1,__ATOMIC_RELAXED);
+    return n;
+}
 static ssize_t bounce_read(int h,unsigned char *at,uint64_t size,int64_t offset) {
     static _Thread_local unsigned char *bounce;
     if (!bounce && !(bounce=malloc(BOUNCE_BYTES))) return -2;   /* no buffer: read directly */
+    __atomic_add_fetch(&bounce_reads,1,__ATOMIC_RELAXED);
     uint64_t want=size<BOUNCE_BYTES ? size : BOUNCE_BYTES;
     ssize_t n=offset<0 ? host_read(h,bounce,want) : pread(h,bounce,want,offset);
     if (n>0) memcpy(at,bounce,(size_t)n);
@@ -370,11 +390,15 @@ static ssize_t full_io(int h,void *buffer,uint64_t size,int64_t offset) {
     unsigned char *at=buffer;
     uint64_t done=0;
     int stalls=0;
+    int use_bounce=!file_direct();
     for (; done<size && stalls<64;) {
-        ssize_t n=bounce_read(h,at+done,size-done,offset<0 ? -1 : offset+(int64_t)done);
+        ssize_t n=use_bounce ? bounce_read(h,at+done,size-done,offset<0 ? -1 : offset+(int64_t)done)
+                             : direct_read(h,at+done,size-done,offset<0 ? -1 : offset+(int64_t)done,0);
         if (n==-2) {   /* no bounce buffer (out of memory): read straight into the guest */
-            touch_for_write(at+done,size-done);
-            n=offset<0 ? host_read(h,at+done,size-done) : pread(h,at+done,size-done,offset+(int64_t)done);
+            n=direct_read(h,at+done,size-done,offset<0 ? -1 : offset+(int64_t)done,1);
+        } else if (!use_bounce) {
+            if (n>=0 && (uint64_t)n<size-done) use_bounce=1;      /* short read: bounce the rest */
+            else if (n<0 && errno==EFAULT) { use_bounce=1; continue; } /* protected page */
         }
         if (n<0) {
             if (errno==EINTR || errno==EFAULT) { ++stalls; continue; }
@@ -706,7 +730,7 @@ int64_t runtime_file_fstat(int fd,void *s) { return do_fstat(fd,s); }
 int64_t runtime_file_getdents(int fd,char *b,uint64_t n,int64_t *base) { return do_getdents(fd,b,n,base); }
 int runtime_file_translate(const char *guest,char *out,size_t size) { return translate(guest,out,size); }
 void runtime_file_report(void) {
-    printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
-           opens,reads,(unsigned long long)bytes_read,writes,missing);
+    printf("Runtime: files opened=%zu, reads=%zu (%llu bytes; %zu chunks via the bounce buffer, %zu direct), writes=%zu, not found=%zu\n",
+           opens,reads,(unsigned long long)bytes_read,bounce_reads,direct_reads,writes,missing);
 }
 

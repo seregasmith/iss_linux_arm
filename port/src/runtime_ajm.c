@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <time.h>
 #include "third_party/LibAtrac9/C/src/libatrac9.h"
 
 #define ERR_INVALID_CONTEXT ((int32_t)0x80930002)
@@ -76,6 +77,19 @@ static pthread_mutex_t lock=PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static Context *contexts[MAX_CONTEXTS+1];
 static Batch batches[MAX_BATCHES];
 static size_t jobs_run, frames_decoded, batches_run;
+/* TLG_AUDIO_STATS=1: how long the synchronous decode inside sceAjmBatchStartBuffer takes (the
+ * whole batch runs under `lock` before the call returns, so a slow batch is a game stall). */
+static uint64_t decode_ns, decode_max_ns;
+static int ajm_stats(void) {
+    static int value=-1;
+    if (value<0) value=getenv("TLG_AUDIO_STATS")!=NULL;
+    return value;
+}
+static uint64_t clock_ns(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC,&t);
+    return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec;
+}
 
 /* TLG_AUDIO_TRACE=1: instance configurations and jobs that return a non-zero result. */
 static int trace_left=-1;
@@ -530,6 +544,8 @@ static ABI int32_t ajm_batch_start(uint32_t id, unsigned char *buffer, uint32_t 
     int slot=-1;
     for (int i=0;i<MAX_BATCHES;++i) if (!batches[i].used) { slot=i; break; }
     if (slot<0) { pthread_mutex_unlock(&lock); return ERR_OUT_OF_RESOURCES; }
+    const int measure=ajm_stats();
+    uint64_t decode_start=measure ? clock_ns() : 0;
     for (unsigned char *p=buffer, *end=buffer+size; p<end;) {
         Chunk chunk; memcpy(&chunk,p,8);
         unsigned char *body=p+8;
@@ -544,6 +560,11 @@ static ABI int32_t ajm_batch_start(uint32_t id, unsigned char *buffer, uint32_t 
         run_job(c,payload(chunk.word),&job);
     }
     if (runtime_verbose() && (batches_run<16 || !(batches_run%5000))) printf("Verbose: Ajm batch #%zu started (%u bytes, context %u)\n",batches_run,size,id);
+    if (measure) {
+        uint64_t spent=clock_ns()-decode_start;
+        decode_ns+=spent;
+        if (spent>decode_max_ns) decode_max_ns=spent;
+    }
     batches[slot]=(Batch){1,(int)id,0};
     ++batches_run;
     *out=(uint32_t)slot+1;
@@ -581,4 +602,7 @@ static const RuntimeExport exports[]={
 uintptr_t runtime_ajm_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_ajm_report(void) {
     printf("Runtime: Ajm batches=%zu, jobs=%zu, ATRAC9 frames decoded=%zu\n",batches_run,jobs_run,frames_decoded);
+    if (batches_run && ajm_stats())
+        printf("Runtime: Ajm decode %llu us/batch average, %llu us max\n",
+               (unsigned long long)(decode_ns/1000/batches_run),(unsigned long long)(decode_max_ns/1000));
 }

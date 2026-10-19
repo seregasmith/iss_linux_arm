@@ -105,7 +105,7 @@ MENU = [
     _menu('Performance', 'fps_limit', 'choice', '0', ('Frame rate limit', 'Limite de FPS'),
           ('Caps the presented frames. The game runs at 30 FPS (as on PS4).',
            'Limita os quadros apresentados. O jogo roda a 30 FPS (como no PS4).'),
-          choices=(('30', '30', '30'), ('60', '60', '60'), ('120', '120', '120'), ('240', '240', '240'),
+          choices=(('24', '24', '24'), ('30', '30', '30'), ('60', '60', '60'), ('120', '120', '120'), ('240', '240', '240'),
                    ('0', 'Unlimited', 'Sem limite'))),
     _menu('Performance', 'frames_queued', 'choice', '1', ('Frames queued', 'Quadros na fila'),
           ('More frames queued: steadier FPS, slower response to input.',

@@ -47,7 +47,8 @@ class OpenExternalTests(unittest.TestCase):
         wb.assert_called_once()
 
     def test_every_launcher_link_uses_it(self):
-        for name in ('qt/backend.py', 'qt/support.py', 'qt/updates.py', 'infamous_launcher.py'):
+        for name in ('qt/backend.py', 'qt/saves.py', 'qt/support.py', 'qt/updates.py',
+                     'infamous_launcher.py'):
             text = (ROOT / 'launcher' / name).read_text(encoding='utf-8')
             self.assertNotIn('webbrowser.open(', text, name)
             self.assertNotIn('QDesktopServices.openUrl(', text, name)

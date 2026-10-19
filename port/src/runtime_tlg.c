@@ -130,9 +130,14 @@ static ABI int32_t ef_wait(EventFlag *ef,uint64_t pattern,uint32_t mode,uint64_t
     if (!pattern || !ef_mode_ok(mode)) return KERR_EINVAL;
     pthread_mutex_lock(&ef->lock);
     if (ef->waiters && !(ef->attr & EF_ATTR_MULTI)) { pthread_mutex_unlock(&ef->lock); return KERR_EPERM; }
-    struct timespec start, deadline;
-    clock_gettime(CLOCK_REALTIME,&start);
+    /* The deadline is CLOCK_REALTIME (the condvar is initialized with the default clock); the
+     * time spent is measured with the monotonic clock, which no step can move backwards (a step
+     * would make the spent time negative and wrap the remaining timeout below). */
+    struct timespec deadline={0,0}, mono_start={0,0};
     if (timeout_us) {
+        struct timespec start;
+        clock_gettime(CLOCK_REALTIME,&start);
+        clock_gettime(CLOCK_MONOTONIC,&mono_start);
         uint64_t ns=(uint64_t)start.tv_nsec+(uint64_t)*timeout_us*1000;
         deadline.tv_sec=start.tv_sec+(time_t)(ns/1000000000); deadline.tv_nsec=(long)(ns%1000000000);
     }
@@ -154,9 +159,10 @@ static ABI int32_t ef_wait(EventFlag *ef,uint64_t pattern,uint32_t mode,uint64_t
     if (timeout_us) {
         if (r==KERR_ETIMEDOUT) *timeout_us=0;
         else {
-            struct timespec now; clock_gettime(CLOCK_REALTIME,&now);
-            int64_t spent=(int64_t)(now.tv_sec-start.tv_sec)*1000000+(now.tv_nsec-start.tv_nsec)/1000;
-            *timeout_us=spent>=(int64_t)*timeout_us ? 0 : (uint32_t)(*timeout_us-spent);
+            struct timespec now; clock_gettime(CLOCK_MONOTONIC,&now);
+            int64_t spent=(int64_t)(now.tv_sec-mono_start.tv_sec)*1000000+(now.tv_nsec-mono_start.tv_nsec)/1000;
+            if (spent<0) spent=0;
+            *timeout_us=spent>=(int64_t)*timeout_us ? 0 : (uint32_t)(*timeout_us-(uint32_t)spent);
         }
     }
     return r;

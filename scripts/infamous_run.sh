@@ -4,13 +4,14 @@
 # Usage: scripts/infamous_run.sh [seconds=120] [shots_dir] [press_script]
 #   press_script: lines "<second> <buttons...>" (e.g. "40 cross", "60 options"); each press lasts 0.3 s.
 # Only one game instance may run at a time on this machine: the script waits for any other.
+# ISS_GAME_DIR: the merged game folder (default game/CUSA00223, as in the launcher).
 set -uo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 port=$root/port
 seconds=${1:-120}; shots=${2:-}; script=${3:-}
-dump=$root/game/CUSA00223
-# One game instance at a time on this machine (shared lock with the other agents' runs).
-lock=${GAME_LOCK:-/tmp/claude-1000/-home-hayatog-decomp/79f27d1d-d3f5-4a2e-a5f3-511e01385ae2/scratchpad/game.lock}
+dump=${ISS_GAME_DIR:-$root/game/CUSA00223}
+# One game instance at a time on this machine (GAME_LOCK: a lock file shared with other runs).
+lock=${GAME_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/infamous-game.lock}
 if [[ -z ${INFAMOUS_RUN_LOCKED:-} ]]; then
     touch "$lock"; exec env INFAMOUS_RUN_LOCKED=1 flock "$lock" "$0" "$@"
 fi

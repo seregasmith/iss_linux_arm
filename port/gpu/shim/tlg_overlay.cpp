@@ -1,3 +1,4 @@
+#include "tlg_perf_trace.h"
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "tlg_overlay.h"
 
@@ -452,6 +453,18 @@ void ImageTab() {
 void FixesSection();
 
 void PerformanceTab() {
+    if (TlgPerf::Enabled()) {
+        ImGui::SeparatorText(TL("Performance capture", "Captura de desempenho"));
+        static int category = 0;
+        const char* labels[] = {TL("Absorb smoke", "Absorver fumaça"), TL("Use power", "Usar poder"),
+                                TL("Movement", "Movimentação"), TL("Other", "Outro")};
+        ImGui::Combo(TL("Event", "Evento"), &category, labels, 4);
+        if (ImGui::Button(TL("Mark performance event", "Marcar evento de desempenho"))) {
+            const bool accepted = TlgPerf::Mark(static_cast<unsigned>(category + 1));
+            TlgOverlay::Notice(accepted ? TL("Event marked", "Evento marcado") :
+                                          TL("Capture queue full", "Fila de captura cheia"), 2.0f);
+        }
+    }
     namespace G = TlgGraphics;
     auto& s = TlgSettings::Get();
     // tlg: GoW3's render-resolution and engine-frame-rate patches and the readback shortcuts are not

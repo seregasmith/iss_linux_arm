@@ -1,0 +1,130 @@
+name: Anti-Spam and Malware Guard
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  scan:
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Scan untrusted issue content
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const isComment = context.eventName === 'issue_comment';
+            const issue = context.payload.issue;
+            const item = isComment ? context.payload.comment : issue;
+            const authorAssociation = String(item.author_association || '').toUpperCase();
+            const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+            // On edit events author_association describes the item's author, not necessarily
+            // the person who made this edit. Only act on edits made by the item's author.
+            if (context.payload.action === 'edited') {
+              const author = item.user && item.user.login;
+              if (!author || author.toLowerCase() !== context.actor.toLowerCase()) return;
+            }
+            if (trustedAssociations.has(authorAssociation)) return;
+
+            const title = isComment ? '' : (item.title || '');
+            const body = item.body || '';
+            const content = `${title}\n${body}`;
+
+            const hasDownloadExecution = [
+              // Common pipeline: irm/iwr https://host/payload | iex
+              /\b(?:irm|iwr|invoke-restmethod|invoke-webrequest)\s+(?:['"])?https?:\/\/[^\s'")|]+['"]?\s*\|\s*(?:iex|invoke-expression)\b/i,
+              // Parenthesized pipeline: iex (irm/iwr https://host/payload)
+              /\b(?:iex|invoke-expression)\s*\(\s*(?:irm|iwr|invoke-restmethod|invoke-webrequest)\s+(?:['"])?https?:\/\//i,
+              // WebClient dropper: iex (...).DownloadString('https://host/payload')
+              /\b(?:iex|invoke-expression)\b[\s\S]{0,200}\.downloadstring\s*\(\s*(?:['"])?https?:\/\//i,
+              // Some campaigns omit the URL scheme but use a known suspicious TLD.
+              /\b(?:irm|iwr|invoke-restmethod|invoke-webrequest)\s+(?:['"])?(?:[a-z0-9-]+\.)+(?:sbs|top|xyz|shop|fun|icu|cyou)\b[^\s'")|]*['"]?\s*\|\s*(?:iex|invoke-expression)\b/i,
+              // Parenthesized variant with a suspicious host and no URL scheme.
+              /\b(?:iex|invoke-expression)\s*\(\s*(?:irm|iwr|invoke-restmethod|invoke-webrequest)\s+(?:['"])?(?:[a-z0-9-]+\.)+(?:sbs|top|xyz|shop|fun|icu|cyou)\b/i
+            ].some(pattern => pattern.test(content));
+            const hasSuspiciousDomainDownload =
+              /\b(?:irm|iwr|invoke-restmethod|invoke-webrequest)\b\s+(?:-[a-z][\w-]*\s+)?(?:['"])?(?:https?:\/\/)?(?:[a-z0-9-]+\.)+(?:sbs|top|xyz|shop|fun|icu|cyou)\b/i.test(content) ||
+              /\.downloadstring\s*\(\s*(?:['"])?https?:\/\/(?:[a-z0-9-]+\.)+(?:sbs|top|xyz|shop|fun|icu|cyou)\b/i.test(content);
+            const hasEncodedPowerShellPayload =
+              /\bpowershell(?:\.exe)?\b[\s\S]{0,80}-(?:e|en|enc|encodedcommand)\b\s+[a-z0-9+/]{40,}={0,2}/i.test(content) ||
+              /\bfrombase64string\s*\([\s\S]{0,300}['"][a-z0-9+/]{40,}={0,2}['"]|['"][a-z0-9+/]{40,}={0,2}['"][\s\S]{0,300}\bfrombase64string\s*\(/i.test(content) ||
+              /\b(?:iex|invoke-expression)\b[\s\S]{0,240}\bfrombase64string\s*\(/i.test(content) ||
+              /\bfrombase64string\s*\([\s\S]{0,240}\b(?:iex|invoke-expression)\b/i.test(content);
+            const fakeFixCampaign =
+              /\[\s*fix\s*\]\s*all\s*gpu\s*crashes\b/i.test(content) &&
+              /\bwin\s*\+\s*x\b[\s\S]{0,160}\bterminal\b[\s\S]{0,80}\badmin(?:istrator)?\b/i.test(content);
+
+            // Require recognizable command syntax or the exact fake-fix campaign markers;
+            // isolated PowerShell API-name mentions do not trigger moderation.
+            const matchesHighConfidencePattern = hasDownloadExecution ||
+              hasSuspiciousDomainDownload ||
+              hasEncodedPowerShellPayload ||
+              fakeFixCampaign;
+
+            if (!matchesHighConfidencePattern) return;
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = issue.number;
+            const warningMarker = '<!-- anti-spam-malware-guard -->';
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              per_page: 100,
+              sort: 'created',
+              direction: 'desc'
+            });
+            const warningAlreadyPosted = comments.data.some(comment =>
+              String(comment.body || '').includes(warningMarker)
+            );
+
+            if (isComment) {
+              if (!warningAlreadyPosted) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  body: `${warningMarker}\n⚠️ **Security notice:** A comment containing a high-confidence malware delivery pattern was removed. Do not run commands or open links from untrusted comments.`
+                });
+              }
+              await github.rest.issues.deleteComment({
+                owner,
+                repo,
+                comment_id: item.id
+              });
+              return;
+            }
+
+            if (!warningAlreadyPosted) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: `${warningMarker}\n⚠️ **Automated security notice:** This issue matched a high-confidence malware delivery pattern. Do not run commands or open links posted in it. The issue was closed and locked for maintainer review.`
+              });
+            }
+            if (issue.state !== 'closed') {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                state: 'closed',
+                state_reason: 'not_planned'
+              });
+            }
+            if (!issue.locked) {
+              await github.rest.issues.lock({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                lock_reason: 'spam'
+              });
+            }

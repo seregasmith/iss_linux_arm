@@ -24,8 +24,13 @@ import shader_cache  # noqa: E402
 # ---------------------------------------------------------------------------------------- i18n
 LANGS = ('pt_BR', 'en_US')
 # Names of the game languages (same as GAME_LANGUAGE_NAMES of the Tk launcher, which needs tkinter to import).
-GAME_LANGUAGE_NAMES = {'en': 'English', 'pt_BR': 'Português (Brasil)', 'es_LA': 'Español (Latinoamérica)',
-                       'fr_CA': 'Français (Canada)', 'tr': 'Türkçe', 'ru': 'Русский'}
+GAME_LANGUAGE_NAMES = {'en': 'English', 'en_GB': 'English (UK)', 'pt_BR': 'Português (Brasil)',
+                       'pt_PT': 'Português (Portugal)', 'es_LA': 'Español (Latinoamérica)', 'es': 'Español (España)',
+                       'fr_CA': 'Français (Canada)', 'fr': 'Français', 'de': 'Deutsch', 'it': 'Italiano',
+                       'nl': 'Nederlands', 'pl': 'Polski', 'tr': 'Türkçe', 'ru': 'Русский', 'cs': 'Čeština',
+                       'hu': 'Magyar', 'el': 'Ελληνικά', 'ro': 'Română', 'fi': 'Suomi', 'sv': 'Svenska', 'da': 'Dansk',
+                       'no': 'Norsk', 'ar': 'العربية', 'ja': '日本語', 'ko': '한국어', 'zh_TW': '繁體中文',
+                       'zh_CN': '简体中文', 'th': 'ไทย', 'vi': 'Tiếng Việt', 'id': 'Bahasa Indonesia'}
 
 
 def load_strings(path=HERE / 'i18n' / 'strings.json'):

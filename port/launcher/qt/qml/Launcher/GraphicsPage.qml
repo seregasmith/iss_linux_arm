@@ -73,6 +73,7 @@ Item {
                         border.color: modelData.active ? page.accent : hot ? Theme.ghostLineHover : Theme.cardLine
                         Column {
                             id: presetCol
+                            z: 1
                             x: 14; y: 13; width: parent.width - 28; spacing: 7
                             Flow {
                                 width: parent.width; spacing: 8
@@ -83,6 +84,13 @@ Item {
                             }
                             Text { width: parent.width; text: modelData.what; wrapMode: Text.WordWrap; color: Theme.textDim
                                    font.family: Theme.fontText; font.pixelSize: 12; lineHeight: 1.3; lineHeightMode: Text.ProportionalHeight }
+                            Text {
+                                visible: modelData.credit !== ""; text: visible ? Theme.tr("gfx_preset_by").replace("{name}", modelData.credit) : ""
+                                color: page.accent; font.family: Theme.fontText; font.pixelSize: 12; font.weight: Font.DemiBold
+                                Accessible.role: Accessible.Button; Accessible.name: text
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: function(mouse) { mouse.accepted = true; Backend.openUrl("apolar") } }
+                            }
                         }
                         MouseArea { id: presetMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                     onClicked: Graphics.applyPreset(modelData.id) }

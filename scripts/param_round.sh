@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# One measurement round of the parameter study (PLANO_TESTES_PARAMETROS_ISS.md).
+# One measurement round of a parameter study (A-B of ISS_* variables in one scene).
 # Usage: scripts/param_round.sh <name> [VAR=value ...]
-#   Needs: GAME_LOCK (the session's game.lock), SAVE_SNAPSHOT (a savedata folder to copy per round),
-#   RESULTS (default ~/decomp/iss_ref/param_tests). Optional: SCENE (file of "<second> <buttons>" lines that
+#   Needs: SAVE_SNAPSHOT (a savedata folder to copy per round) and a prepared port/out (bash port/build.sh,
+#   then one scripts/infamous_run.sh). Optional: RESULTS (default port/out/param_tests; <name>/ in it is
+#   replaced), GAME_LOCK (shared with scripts/infamous_run.sh), ISS_GAME_DIR (default game/CUSA00223), SCENE (file of "<second> <buttons>" lines that
 #   gets the game from the title to the scene; "replay" starts a TLG_PAD_REPLAY recording), WARM_MAX, MEASURE_S.
 # One round: isolated user dir (own save copy, shared shader cache), fixed tlg.ini, warm up until the
 # shaders stop compiling, 60 s of measurement with the monitor running, a burst of frame dumps in the
@@ -10,8 +11,8 @@
 set -uo pipefail
 name=${1:?name}; shift
 root=$(cd -- "$(dirname -- "$0")/.." && pwd); port=$root/port
-lock=${GAME_LOCK:?set GAME_LOCK}; snap=${SAVE_SNAPSHOT:?set SAVE_SNAPSHOT}
-results=${RESULTS:-$HOME/decomp/iss_ref/param_tests}; warm_max=${WARM_MAX:-180}; measure=${MEASURE_S:-60}
+lock=${GAME_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/infamous-game.lock}; snap=${SAVE_SNAPSHOT:?set SAVE_SNAPSHOT}
+results=${RESULTS:-$port/out/param_tests};warm_max=${WARM_MAX:-180}; measure=${MEASURE_S:-60}
 r=$results/$name; rm -rf "$r"; mkdir -p "$r/dumps" "$r/user"
 if [[ -z ${PARAM_ROUND_LOCKED:-} ]]; then
     touch "$lock"; exec env PARAM_ROUND_LOCKED=1 flock -x "$lock" "$0" "$name" "$@"
@@ -55,7 +56,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-dump=$root/game/CUSA00223
+dump=${ISS_GAME_DIR:-$root/game/CUSA00223}
 (cd "$r/user" && exec env "${envs[@]}" ISS_APP_NAME="inFAMOUS Second Son" ISS_APP_ID=infamous-pc \
     "$port/out/tlg-probe" "$port/out/boot-linked.bin" --app0 "$dump" --user . \
     --content-profile "$port/out/content.bin" --timeout $((warm_max + measure + 240))) > "$r/game.log" 2>&1 &

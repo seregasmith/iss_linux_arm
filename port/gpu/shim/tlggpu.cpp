@@ -1,3 +1,4 @@
+#include "tlg_perf_trace.h"
 #include "tlg_write_log.h"
 // tlg: glue between the C loader and the vendored shadPS4 video core.
 #include "tlg_overlay.h"
@@ -41,6 +42,7 @@ extern "C" {
 // runtime_memory.c
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 int runtime_memory_write_backing(uintptr_t address, const void* data, uint64_t size);
+int runtime_memory_fill_backing(uintptr_t address, int value, uint64_t size);
 int runtime_memory_read_backing(uintptr_t address, void* data, uint64_t size);
 uint64_t runtime_memory_clamp(uintptr_t address, uint64_t size);
 int runtime_memory_region(uintptr_t address, uintptr_t* start, uintptr_t* end, int* mapped);
@@ -153,6 +155,22 @@ bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
     }
     return written;
 }
+bool MemoryManager::FillBacking(void* address, int fill, u64 size) {
+    // The write log keeps only the first bytes of a write; the pattern stands in for the fill
+    // byte (Record reads at most the first 64 of them, and only 8 for writes over 64 bytes).
+    std::uint8_t pattern[64];
+    std::memset(pattern, fill, sizeof(pattern));
+    TlgWriteLog::Note(reinterpret_cast<uintptr_t>(address), pattern, size, TlgWriteLog::Backing);
+    const bool written =
+        runtime_memory_fill_backing(reinterpret_cast<uintptr_t>(address), fill, size) != 0;
+    // tlg (gow3_pc #331): the write skipped page tracking, so textures over it must reload; as
+    // in TryWriteBacking, small writes cannot hold texels and are left out.
+    if (written && rasterizer && size > 8) {
+        rasterizer->GetTextureCache().NoteBackingWrite(reinterpret_cast<VAddr>(address), size);
+    }
+    return written;
+}
+
 void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms) {
     TlgStats::Timer timer{TlgStats::t_protect};
     const u64 pages = (size + 4095) / 4096;
@@ -286,6 +304,7 @@ extern "C" void tlggpu_init_headless(const TlgGpuConfig* config) {
 #else
     if (config->user_dir) setenv("TLG_GPU_USER_DIR", config->user_dir, 0);
 #endif
+    TlgPerf::InitFromEnvironment();
     Core::Emulator::FillElfInfo(*config);
 }
 
@@ -312,8 +331,9 @@ extern "C" int tlggpu_init(const TlgGpuConfig* config) {
 #else
     if (config->user_dir) setenv("TLG_GPU_USER_DIR", config->user_dir, 0);
 #endif
+    TlgPerf::InitFromEnvironment();
     Core::Emulator::FillElfInfo(*config);
-    const std::string title = config->title ? config->title : "God of War III";
+    const std::string title = config->title ? config->title : "inFAMOUS Second Son";
     const s32 width = config->width, height = config->height;
     g_window_thread = std::thread([title, width, height] {
         Common::SetCurrentThreadName("tlg:window");
@@ -330,6 +350,7 @@ extern "C" int tlggpu_init(const TlgGpuConfig* config) {
         LOG_INFO(Frontend, "Window closed by user");
         runtime_report();
         std::fflush(stdout);
+        TlgPerf::Stop(); // _Exit bypasses atexit; finish diagnostics on normal window close.
         std::_Exit(0);
     });
     g_window_thread.detach();

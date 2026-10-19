@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import sys
 import time
@@ -29,6 +30,9 @@ import userdata
 FROZEN = bool(getattr(sys, 'frozen', False))
 PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
 REPO_DIR = PORT_DIR.parent
+BUILTIN_MODS = (PORT_DIR / 'patches' / 'iss_builtin_intro.xml',)
+sys.path.insert(0, str(PORT_DIR / 'scripts'))
+import mod_patches  # noqa: E402
 # A package that cannot write next to itself (the AppImage: a read-only Nix store) keeps the
 # generated files in its data folder, ISS_OUT_DIR, and names its loader in ISS_PROBE.
 OUT_DIR = Path(os.environ['ISS_OUT_DIR']) if os.environ.get('ISS_OUT_DIR') else PORT_DIR / 'out'
@@ -39,6 +43,42 @@ def user_dir():
     file (survives reinstalling), else <port folder>/user (userdata.py has the rules). Always call
     this instead of caching it: the Qt launcher changes it while running."""
     return userdata.user_dir(PORT_DIR)
+
+
+def mods_dir():
+    """ISS_MODS_DIR, else user_dir()/mods (created empty on first use so the player sees where
+    to drop shadPS4/GoldHEN cheat XML files). Not cached: user_dir() can change while running."""
+    directory = Path(os.environ.get('ISS_MODS_DIR') or user_dir() / 'mods')
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def mods_config():
+    return Path(os.environ.get('ISS_MODS_CONFIG') or user_dir() / 'mods.json')
+
+
+def list_mods(settings):
+    """[(key, name, note, enabled)] for the Mods tab: every shadPS4/GoldHEN cheat XML found in
+    the mods folder for this game's version, with its current enabled state."""
+    from infamous_patches import TITLE_IDS
+    app_version = mod_patches.game_app_version(settings['game_dir'])
+    found = mod_patches.external_patches(
+        mods_dir(), app_version, TITLE_IDS, builtin_files=BUILTIN_MODS)
+    selected = {key for key, _, _ in mod_patches.external_selection(found, mods_config())}
+    return [(key, meta.get('Name'), meta.get('Note', ''), key in selected) for key, _, meta in found]
+
+
+def set_mod_enabled(key, enabled):
+    """Updates mods.json: moves key into enabled/disabled, out of the other list."""
+    path = mods_config()
+    try:
+        data = json.loads(path.read_text()) if path.is_file() else {}
+    except (OSError, ValueError):
+        data = {}
+    on, off = set(data.get('enabled', [])), set(data.get('disabled', []))
+    (on if enabled else off).add(key)
+    (off if enabled else on).discard(key)
+    path.write_text(json.dumps({'enabled': sorted(on), 'disabled': sorted(off)}, indent=2))
 
 
 def __getattr__(name):  # old code that still reads tlg_run.USER_DIR gets the current folder
@@ -52,17 +92,32 @@ PROBE = (Path(os.environ['ISS_PROBE']) if os.environ.get('ISS_PROBE')
          else OUT_DIR / ('tlg-probe.exe' if os.name == 'nt' else 'tlg-probe'))
 KEEP_LOGS = 30
 
-# Game language: PS4 system language ids (sceSystemServiceParamGetInt LANG). The list the game
-# really ships voice/text for is still to be checked against the dump.
-GAME_LANGUAGES = {'en': 1, 'pt_BR': 17, 'es_LA': 20, 'fr_CA': 22, 'tr': 19, 'ru': 8}
-
-_LANGUAGE_PREFIX = {'pt': 'pt_BR', 'es': 'es_LA', 'fr': 'fr_CA', 'tr': 'tr', 'ru': 'ru'}
+# Game language: PS4 system language ids (sceSystemServiceParamGetInt LANG). Which of them the
+# player's dump has comes from its PlayGo chunks (game_languages); each choice passes its own id.
+GAME_LANGUAGES = {'en': 1, 'en_GB': 18, 'pt_BR': 17, 'pt_PT': 7, 'es_LA': 20, 'es': 3, 'fr_CA': 22, 'fr': 2,
+                  'de': 4, 'it': 5, 'nl': 6, 'pl': 16, 'tr': 19, 'ru': 8, 'cs': 23, 'hu': 24, 'el': 25, 'ro': 26,
+                  'fi': 12, 'sv': 13, 'da': 14, 'no': 15, 'ar': 21, 'ja': 0, 'ko': 9, 'zh_TW': 10, 'zh_CN': 11,
+                  'th': 27, 'vi': 28, 'id': 29}
+# Offered when the game files cannot tell (no playgo-chunk.dat, as in FTP dumps): the CUSA00223 set.
+_DEFAULT_LANGUAGES = ('en', 'pt_BR', 'es_LA', 'fr_CA', 'tr', 'ru')
+# The closest choice when the system's language is missing from the game files.
+_LANGUAGE_SIBLING = {'en_GB': 'en', 'pt_PT': 'pt_BR', 'pt_BR': 'pt_PT', 'es': 'es_LA', 'es_LA': 'es',
+                     'fr': 'fr_CA', 'fr_CA': 'fr', 'zh_TW': 'zh_CN', 'zh_CN': 'zh_TW'}
+# Locale language (and region) -> choice; a language not listed here is English.
+_LANGUAGE_REGION = {('en', 'gb'): 'en_GB', ('en', 'ie'): 'en_GB', ('en', 'au'): 'en_GB', ('en', 'nz'): 'en_GB',
+                    ('pt', 'br'): 'pt_BR', ('pt', ''): 'pt_BR', ('es', 'es'): 'es', ('fr', 'ca'): 'fr_CA',
+                    ('zh', 'tw'): 'zh_TW', ('zh', 'hk'): 'zh_TW', ('zh', 'mo'): 'zh_TW', ('zh', 'hant'): 'zh_TW'}
+_LANGUAGE_PREFIX = {'en': 'en', 'pt': 'pt_BR', 'es': 'es_LA', 'fr': 'fr', 'de': 'de', 'it': 'it', 'nl': 'nl',
+                    'pl': 'pl', 'tr': 'tr', 'ru': 'ru', 'cs': 'cs', 'hu': 'hu', 'el': 'el', 'ro': 'ro', 'fi': 'fi',
+                    'sv': 'sv', 'da': 'da', 'no': 'no', 'nb': 'no', 'nn': 'no', 'ar': 'ar', 'ja': 'ja', 'ko': 'ko',
+                    'zh': 'zh_CN', 'th': 'th', 'vi': 'vi', 'id': 'id', 'in': 'id'}
 
 
 def system_game_language(environ=None):
     """The game language that follows the system one: LC_ALL, LC_MESSAGES, LANG, then the Python
-    locale and, on Windows, the user's default locale name. pt (also pt_PT) is pt_BR, es is es_LA,
-    fr is fr_CA, tr and ru stay, anything else is English."""
+    locale and, on Windows, the user's default locale name. The region picks the variant (es_ES is
+    es, other Spanish is es_LA; pt_PT is pt_PT, pt_BR and a bare pt are pt_BR; fr_CA, en_GB, zh_TW);
+    a language the PS4 has no id for is English."""
     environ = os.environ if environ is None else environ
     code = ''
     for name in ('LC_ALL', 'LC_MESSAGES', 'LANG'):
@@ -83,13 +138,84 @@ def system_game_language(environ=None):
                 code = buf.value
         except Exception:
             code = ''
-    return _LANGUAGE_PREFIX.get(re.split(r'[_\-.@]', code.strip().lower())[0], 'en')
+    parts = re.split(r'[_\-.@]', code.strip().lower())
+    language = parts[0]
+    # Windows names: Portuguese_Brazil, Spanish_Spain... (locale.getlocale on Windows)
+    windows = {'english': 'en', 'portuguese': 'pt', 'spanish': 'es', 'french': 'fr', 'german': 'de',
+               'italian': 'it', 'dutch': 'nl', 'polish': 'pl', 'turkish': 'tr', 'russian': 'ru', 'czech': 'cs',
+               'hungarian': 'hu', 'greek': 'el', 'romanian': 'ro', 'finnish': 'fi', 'swedish': 'sv',
+               'danish': 'da', 'norwegian': 'no', 'arabic': 'ar', 'japanese': 'ja', 'korean': 'ko',
+               'chinese': 'zh', 'thai': 'th', 'vietnamese': 'vi', 'indonesian': 'id'}
+    regions = {'brazil': 'br', 'portugal': 'pt', 'spain': 'es', 'canada': 'ca', 'united kingdom': 'gb',
+               'taiwan': 'tw', 'hong kong sar': 'hk'}
+    language = windows.get(language, language)
+    region = regions.get(parts[1], parts[1]) if len(parts) > 1 else ''
+    if language == 'pt' and region == 'pt':
+        return 'pt_PT'
+    if language == 'pt':
+        return 'pt_BR'
+    if (language, region) in _LANGUAGE_REGION:
+        return _LANGUAGE_REGION[(language, region)]
+    if language == 'zh' and len(parts) > 2 and parts[1] == 'hant':
+        return 'zh_TW'
+    return _LANGUAGE_PREFIX.get(language, 'en')
+
+
+def playgo_languages(path):
+    """PS4 language ids the package has its own PlayGo chunks for, from sce_sys/playgo-chunk.dat
+    ("plgo"; chunk count at 10, chunk attribute table offset at 192; each 32-byte attribute has a
+    64-bit language mask at 16, bit 63 - id). Chunks for every language (mask 0 or all ones) say
+    nothing, so a package without language chunks gives an empty set."""
+    data = Path(path).read_bytes()
+    if data[:4] != b'plgo' or len(data) < 200:
+        raise ValueError('not a PlayGo chunk file')
+    count = struct.unpack_from('<H', data, 10)[0]
+    table = struct.unpack_from('<I', data, 192)[0]
+    if table + count * 32 > len(data):
+        raise ValueError('PlayGo chunk table out of the file')
+    ids = set()
+    for i in range(count):
+        mask = struct.unpack_from('<Q', data, table + i * 32 + 16)[0]
+        if mask & 0xffffffff and not mask >> 32:  # written big-endian: ids 0-31 are the high bits
+            mask = int.from_bytes(mask.to_bytes(8, 'little'), 'big')
+        if mask not in (0, (1 << 64) - 1):
+            ids |= {63 - bit for bit in range(64) if mask >> bit & 1}
+    return ids
+
+
+def game_languages(game_dir):
+    """The GAME_LANGUAGES keys the game files have, in that order, from the PlayGo chunk languages
+    of <game>/sce_sys/playgo-chunk.dat; the CUSA00223 set when that cannot tell (no file: FTP dumps
+    do not expose it; or no language chunk). param.sfo is no help: its TITLE_xx keys are store titles."""
+    ids = set()
+    if game_dir:
+        try:
+            ids = _cached(Path(game_dir) / 'sce_sys' / 'playgo-chunk.dat', 'languages', playgo_languages)
+        except (OSError, ValueError, struct.error):
+            pass
+    return [key for key, code in GAME_LANGUAGES.items() if code in ids] or list(_DEFAULT_LANGUAGES)
+
+
+def game_language_choices(settings):
+    """The game language box of both launchers: 'auto', the languages the game files have and the
+    saved choice even when they lack it (never changed behind the player's back)."""
+    keys = ['auto'] + game_languages(settings.get('game_dir', ''))
+    choice = settings.get('game_language', 'auto')
+    return keys + [choice] if choice in GAME_LANGUAGES and choice not in keys else keys
 
 
 def resolve_game_language(settings, environ=None):
-    """settings['game_language'] when it is one of GAME_LANGUAGES; 'auto' (or anything unknown) follows the system."""
+    """settings['game_language'] when it is one of GAME_LANGUAGES; 'auto' (or anything unknown) follows
+    the system; when the game files lack that language, its closest variant (es/es_LA, pt_PT/pt_BR...),
+    else English, else the first language they have."""
     choice = settings.get('game_language', 'auto')
-    return choice if choice in GAME_LANGUAGES else system_game_language(environ)
+    if choice in GAME_LANGUAGES:
+        return choice
+    system, present = system_game_language(environ), game_languages(settings.get('game_dir', ''))
+    for key in (system, _LANGUAGE_SIBLING.get(system), 'en', 'en_GB'):
+        if key in present:
+            return key
+    return present[0]
 
 
 # TLG core defaults (the reasons are in each comment; still to be validated on this game).
@@ -157,6 +283,8 @@ def save_settings(settings):
 # The supported eboot.bin (update 1.07, US): entry point and memory image size from its ELF
 # headers, the same whatever tool decrypted it (base 1.00 is 0x933850 / 85,115,231 bytes).
 EBOOT_107 = (0x61dfd0, 133_846_143)
+# APP_VER of the update's param.sfo; mods (cheat XML) are chosen by it.
+APP_VER_107 = '01.07'
 
 # Messages about the player's game folder (en, pt); the launcher shows them in its language,
 # the command line prints both. {detail} names the file.
@@ -173,11 +301,17 @@ TEXT = {
                     'CUSA00223 (US) 1.07. ' + _COPY_UPDATE[0],
                     'O eboot.bin não é o do update 1.07 ({detail}); o port só é testado com o CUSA00223 (EUA) '
                     '1.07. ' + _COPY_UPDATE[1]),
+    'old_param': ('{detail} is not the one from update 1.07: the game starts, but cheats (mods) made for 1.07 '
+                  'are not listed. Copy the 1.07 param.sfo (on the PS4: /system_data/priv/appmeta/CUSA00223/param.sfo) '
+                  'into the game folder\'s sce_sys/; see "Required game files" in the README.',
+                  'O {detail} não é o do update 1.07: o jogo abre, mas os cheats (mods) feitos para o 1.07 não '
+                  'aparecem. Copie o param.sfo do 1.07 (no PS4: /system_data/priv/appmeta/CUSA00223/param.sfo) '
+                  'para o sce_sys/ da pasta do jogo; veja "Arquivos do jogo necessários" no README.'),
     'unreadable': ('{detail} could not be read (damaged, incomplete or still encrypted): dump it again from the PS4.',
                    'Não deu para ler o {detail} (danificado, incompleto ou ainda criptografado): faça o dump de novo no PS4.'),
 }
 # Problems that are reported but do not block Play.
-WARNINGS = {'other_eboot'}
+WARNINGS = {'other_eboot', 'old_param'}
 
 
 def message(key, portuguese=None, **fmt):
@@ -244,6 +378,10 @@ def check_game(game_dir):
             entry, size = _cached(eboot, 'layout', eboot_layout)
             if (entry, size) != EBOOT_107:
                 problems.append(('other_eboot', f'entry={entry:#x}, image={size:,} bytes'))
+            else:  # the base 1.00 param.sfo beside the 1.07 eboot: no 1.07 mods
+                version = mod_patches.game_app_version(game)
+                if version not in (None, APP_VER_107):
+                    problems.append(('old_param', f'sce_sys/param.sfo (APP_VER {version})'))
         except (OSError, ValueError, KeyError, StopIteration) as error:
             problems.append(('unreadable', f'eboot.bin ({error})'))
     for module in MODULES:
@@ -376,6 +514,8 @@ def prepare(settings, log=print):
         [*python_command(scripts / 'prepare.py'), game, '--out', str(OUT_DIR)],
         [*python_command(scripts / 'link_modules.py'), game, '--out', str(OUT_DIR), '--modules', *modules],
         [*python_command(scripts / 'content_profile.py'), game, '--out', str(OUT_DIR)],
+        [*python_command(scripts / 'infamous_patches.py'), game, '--out', str(OUT_DIR),
+         '--mods-dir', str(mods_dir()), '--mods-config', str(mods_config())],
     ]
     for step in steps:
         result = subprocess.run(step, cwd=str(scripts), capture_output=True, text=True,
@@ -693,7 +833,7 @@ def launch(settings, seconds=0, extra_env=None):
         print(note, flush=True)
     cmd = [str(PROBE), str(OUT_DIR / 'boot-linked.bin'), '--app0', settings['game_dir'],
            '--user', str(data), '--content-profile', str(OUT_DIR / 'content.bin'),
-           '--timeout', str(int(seconds))]
+           '--patches', str(OUT_DIR / 'patches.bin'), '--timeout', str(int(seconds))]
     if ISA_TABLE.is_file():
         cmd += ['--isa-rewrite', str(ISA_TABLE)]
     with open(log, 'wb') as out:   # the child keeps its own copy of the descriptor
@@ -728,6 +868,13 @@ def main(argv=None):
         return 1
     try:
         prepare(settings, log=lambda line: None)
+        # Import here: precompile itself imports this module. The direct --play path
+        # must use the same first-start job generation as the Qt/Tk interfaces.
+        import precompile
+        outcome = precompile.prepare_jobs(settings)
+        print(f'Precompile jobs: {outcome}', flush=True)
+        if outcome == 'cancelled':
+            return 1
     except RuntimeError as error:  # GameError included: a message, never a traceback
         print(error, file=sys.stderr)
         return 1

@@ -108,7 +108,7 @@ def _process_names():
             flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
             out = subprocess.run(['tasklist', '/FO', 'CSV', '/NH', '/FI', 'IMAGENAME eq tlg-probe.exe'],
                                  capture_output=True, text=True, timeout=10, creationflags=flags).stdout
-            names = [line.split('","')[0].strip('"') for line in out.splitlines() if line.strip()]
+            names = [line.split('","')[0].strip('"') for line in (out or '').splitlines() if line.strip()]
         except (OSError, subprocess.SubprocessError):
             pass
         return names

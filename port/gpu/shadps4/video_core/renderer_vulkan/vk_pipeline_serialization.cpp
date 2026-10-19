@@ -1,3 +1,4 @@
+#include "tlg_perf_trace.h"
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -283,23 +284,44 @@ vk::ResultValue<vk::UniquePipeline> CreateCachedGraphicsPipeline(
     using namespace PipelineBinaryCache;
     const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
     const bool enabled = global_key.keySize && EmulatorSettings.IsPipelineCacheEnabled();
-    const auto create = [&](vk::PipelineCache used_cache, const auto& used_info, bool restored) {
+    const auto create = [&](vk::PipelineCache used_cache, const auto& used_info, bool restored,
+                            bool retry = true) {
         const auto started = std::chrono::steady_clock::now();
-        auto result = device.createGraphicsPipelineUnique(used_cache, used_info);
+        // One snapshot: feedback is attached and read under the same decision.
+        const bool trace = TlgPerf::Enabled();
+        const u64 trace_key = trace ? std::hash<GraphicsPipelineKey>{}(key) : 0;
+        TlgPerf::Span trace_build{TlgPerf::Kind::CompileBegin, TlgPerf::Kind::CompileEnd,
+                                 trace_key, 'g'};
+        vk::PipelineCreationFeedback feedback{};
+        const vk::PipelineCreationFeedbackCreateInfo feedback_info{
+            .pNext = used_info.pNext, .pPipelineCreationFeedback = &feedback};
+        auto measured_info = used_info;
+        if (trace) measured_info.pNext = &feedback_info;
+        auto result = device.createGraphicsPipelineUnique(used_cache, measured_info);
         // tlg: a failure the driver may recover from is tried again (a binary that failed to
         // restore is compiled instead).
         for (u32 attempt = 1;
-             !restored && result.result != vk::Result::eSuccess &&
+             retry && !restored && result.result != vk::Result::eSuccess &&
              RetryPipelineCreation(result.result, attempt, "graphics",
                                    fmt::format("{:#x}", std::hash<GraphicsPipelineKey>{}(key)));
              ++attempt) {
-            result = device.createGraphicsPipelineUnique(used_cache, used_info);
+            result = device.createGraphicsPipelineUnique(used_cache, measured_info);
+        }
+        if (trace) {
+            TlgPerf::Event e; e.kind = TlgPerf::Kind::PipelineFeedback; e.operation = trace_build.Id();
+            e.object = trace_key;
+            e.b = result.result == vk::Result::eSuccess ? TlgPerf::CacheFeedback(static_cast<unsigned>(feedback.flags)) : 0;
+            e.a = e.b ? feedback.duration : 0;
+            e.generation = 'g'; TlgPerf::Emit(e);
         }
         const auto ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 std::chrono::steady_clock::now() - started)
                                 .count());
         extern std::atomic<u64> g_tlg_pipeline_driver_ns;
         g_tlg_pipeline_driver_ns += ns;
+        if (result.result == vk::Result::eSuccess) {
+            g_tlg_driver_pipelines_created.fetch_add(1, std::memory_order_relaxed);
+        }
         if (enabled) {
             (restored ? binary_restore_ns : binary_compile_ns) += ns;
             ++(restored ? binary_restore_calls : binary_compile_calls);
@@ -330,6 +352,12 @@ vk::ResultValue<vk::UniquePipeline> CreateCachedGraphicsPipeline(
     binary_key_ns += ElapsedNs(key_started);
     if (key_result != vk::Result::eSuccess ||
         !ValidKey(global) || !ValidKey(BinaryKey(pipeline_key))) {
+        // tlg: a binary that is skipped used to be counted only: the call name and the VkResult are
+        // what a crash right after it (NVIDIA 595, ISS_PIPELINE_BINARIES) needs (TLG_GPU_LOG=info).
+        LOG_INFO(Render_Vulkan,
+                 "tlg: pipeline binary skipped (vkGetPipelineKeyKHR {}, global key {}, pipeline "
+                 "key {})",
+                 vk::to_string(key_result), global.size(), pipeline_key.keySize);
         ++binary_errors;
         ++binary_misses;
         return create(cache, info, false);
@@ -398,19 +426,34 @@ vk::ResultValue<vk::UniquePipeline> CreateCachedGraphicsPipeline(
                     ++binary_hits;
                     return result;
                 }
+                // tlg: the created pipeline was rejected with binaries (NVIDIA 595 crashed right
+                // after this): name the call and its VkResult (TLG_GPU_LOG=info).
+                LOG_INFO(Render_Vulkan,
+                         "tlg: pipeline binary restore rejected ({} binaries, createGraphicsPipeline "
+                         "result {})",
+                         handles.size(), vk::to_string(result.result));
+            } else {
+                LOG_INFO(Render_Vulkan,
+                         "tlg: pipeline binary restore failed (vkCreatePipelineBinariesKHR {})",
+                         vk::to_string(static_cast<vk::Result>(handles_result)));
             }
             ++binary_rejected;
             destroy();
         }
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        // tlg: name what failed on the restore path (TLG_GPU_LOG=info).
+        LOG_INFO(Render_Vulkan, "tlg: pipeline binary restore failed: {}", e.what());
         ++binary_errors;
         destroy();
     }
     ++binary_misses;
     flags.flags = vk::PipelineCreateFlags2{static_cast<VkPipelineCreateFlags>(info.flags)} |
                   vk::PipelineCreateFlagBits2::eCaptureDataKHR;
-    auto result = create(nullptr, captured_info, false);
+    // tlg: not retried: a failed capture compile falls back to a plain compile, which is.
+    auto result = create(nullptr, captured_info, false, false);
     if (result.result != vk::Result::eSuccess) {
+        LOG_INFO(Render_Vulkan, "tlg: pipeline binary capture creation failed ({})",
+                 vk::to_string(result.result));
         ++binary_errors;
         return create(cache, info, false);
     }
@@ -427,16 +470,27 @@ vk::ResultValue<vk::UniquePipeline> CreateCachedGraphicsPipeline(
             VK_STRUCTURE_TYPE_PIPELINE_BINARY_CREATE_INFO_KHR};
         binary_info.pipeline = *result.value;
         VkPipelineBinaryHandlesInfoKHR output{VK_STRUCTURE_TYPE_PIPELINE_BINARY_HANDLES_INFO_KHR};
-        if (dispatch.vkCreatePipelineBinariesKHR(device, &binary_info, nullptr, &output) !=
-                VK_SUCCESS ||
-            !output.pipelineBinaryCount || output.pipelineBinaryCount > MaxBinaries) {
+        const auto count_result =
+            dispatch.vkCreatePipelineBinariesKHR(device, &binary_info, nullptr, &output);
+        if (count_result != VK_SUCCESS || !output.pipelineBinaryCount ||
+            output.pipelineBinaryCount > MaxBinaries) {
+            // tlg: the VkResult and the call name of a failed capture (TLG_GPU_LOG=info).
+            LOG_INFO(Render_Vulkan,
+                     "tlg: pipeline binary capture failed (vkCreatePipelineBinariesKHR count {}, "
+                     "binaries {})",
+                     vk::to_string(static_cast<vk::Result>(count_result)),
+                     output.pipelineBinaryCount);
             ++binary_errors;
             return result;
         }
         handles.resize(output.pipelineBinaryCount);
         output.pPipelineBinaries = handles.data();
-        if (dispatch.vkCreatePipelineBinariesKHR(device, &binary_info, nullptr, &output) !=
-            VK_SUCCESS) {
+        const auto handles_result =
+            dispatch.vkCreatePipelineBinariesKHR(device, &binary_info, nullptr, &output);
+        if (handles_result != VK_SUCCESS) {
+            LOG_INFO(Render_Vulkan,
+                     "tlg: pipeline binary capture failed (vkCreatePipelineBinariesKHR {})",
+                     vk::to_string(static_cast<vk::Result>(handles_result)));
             ++binary_errors;
             return result;
         }
@@ -448,18 +502,28 @@ vk::ResultValue<vk::UniquePipeline> CreateCachedGraphicsPipeline(
             vk::PipelineBinaryKeyKHR binary_key;
             size_t size = 0;
             auto* raw_key = reinterpret_cast<VkPipelineBinaryKeyKHR*>(&binary_key);
-            if (dispatch.vkGetPipelineBinaryDataKHR(device, &data_info, raw_key, &size, nullptr) !=
-                    VK_SUCCESS ||
-                !size || size > MaxFileSize || total_size + size > MaxFileSize ||
-                !ValidKey(BinaryKey(binary_key))) {
+            const auto data_result =
+                dispatch.vkGetPipelineBinaryDataKHR(device, &data_info, raw_key, &size, nullptr);
+            if (data_result != VK_SUCCESS || !size || size > MaxFileSize ||
+                total_size + size > MaxFileSize || !ValidKey(BinaryKey(binary_key))) {
+                LOG_INFO(Render_Vulkan,
+                         "tlg: pipeline binary capture failed (vkGetPipelineBinaryDataKHR {}, "
+                         "size {})",
+                         vk::to_string(static_cast<vk::Result>(data_result)), size);
                 ++binary_errors;
                 return result;
             }
             total_size += size;
             Binary binary{BinaryKey(binary_key), std::vector<u8>(size)};
-            if (dispatch.vkGetPipelineBinaryDataKHR(device, &data_info, raw_key, &size,
-                                                    binary.data.data()) != VK_SUCCESS ||
-                size > binary.data.size()) {
+            const auto copy_result =
+                dispatch.vkGetPipelineBinaryDataKHR(device, &data_info, raw_key, &size,
+                                                    binary.data.data());
+            if (copy_result != VK_SUCCESS || size > binary.data.size()) {
+                LOG_INFO(Render_Vulkan,
+                         "tlg: pipeline binary capture failed (vkGetPipelineBinaryDataKHR {}, size "
+                         "{}/{})",
+                         vk::to_string(static_cast<vk::Result>(copy_result)), size,
+                         binary.data.size());
                 ++binary_errors;
                 return result;
             }
@@ -1174,6 +1238,10 @@ struct PipelineCache::BackgroundWarmup {
     /// stages, and build each pipeline when the game first asks for it (the driver's own cache
     /// has it from the first start's compilation, so that takes about a millisecond).
     bool stages_only = false;
+    /// tlg: TLG_WARMUP_BUILD_CACHED=1 (default off): with `stages_only`, still build the pipelines
+    /// of the store in the background: on a driver whose cache lost them (an update, a crash, a
+    /// pipeline built in the last minute) the game would otherwise compile them where it draws.
+    bool build_cached = false;
     u32 loaded = 0, threads = 0;
     u32 merge_refused_initial = 0, merge_refused_moved = 0, merge_refused_taken = 0;
     std::chrono::steady_clock::time_point started, last_batch;
@@ -1199,16 +1267,14 @@ bool PipelineCache::StartBackgroundWarmUp() {
                                              Storage::GameCacheDir() / Precompile::DoneFile, ec);
         if (warm.stages_only) {
             UseDefaultPipelineWait();
-        }
-        // TLG_LAZY_PROGRAMS=0 keeps loading every stage in the background instead.
-        const char* lazy = std::getenv("TLG_LAZY_PROGRAMS");
-        if (warm.stages_only && !(lazy && *lazy == '0')) {
-            lazy_programs = true;
-            std::printf("Pipeline warm-up: none; programs load from the cache on first use "
-                        "(%zu programs on disk)\n", next_permutation.size());
-            delete background;
-            background = nullptr;
-            return true;
+            // tlg: TLG_WARMUP_BUILD_CACHED=1 also builds the pipelines of a precompiled cache in
+            // the background (covers a driver cache lost to an update or a crash, at the cost of
+            // CPU time while the game runs); by default they are left to the driver's own cache.
+            static const bool build_cached = [] {
+                const char* v = std::getenv("TLG_WARMUP_BUILD_CACHED");
+                return v && *v == '1';
+            }();
+            warm.build_cached = build_cached;
         }
     }
     warm.threads = WarmupThreadCount(std::max(1u, std::thread::hardware_concurrency()));
@@ -1228,7 +1294,11 @@ bool PipelineCache::StartBackgroundWarmUp() {
         return true;
     });
     std::printf("Pipeline warm-up: loading %s in the background (%u threads)\n",
-                warm.stages_only ? "shader stages only" : "pipelines", warm.threads);
+                warm.stages_only
+                    ? (warm.build_cached ? "the precompiled cache's shader stages and pipelines"
+                                         : "shader stages only")
+                    : "pipelines",
+                warm.threads);
     return true;
 }
 
@@ -1376,6 +1446,7 @@ void PipelineCache::PumpWarmUp() {
         warm.loaded += kept;
         warm.done.fetch_add(1, std::memory_order_relaxed);
     }
+    warmup_pipelines_loaded = warm.loaded; // for the worker cache re-seed (SeedWorkerCaches)
 
     const auto now = std::chrono::steady_clock::now();
     if (now - warm.last_batch < 4ms) {
@@ -1414,7 +1485,7 @@ void PipelineCache::PumpWarmUp() {
                 fetch = stage.fetch; // the blocking load keeps the last stage's too
             }
         }
-        if (!usable || warm.stages_only) {
+        if (!usable || (warm.stages_only && !warm.build_cached)) {
             warm.done.fetch_add(1, std::memory_order_relaxed);
             continue;
         }

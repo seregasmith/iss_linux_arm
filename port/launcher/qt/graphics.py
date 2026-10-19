@@ -27,8 +27,8 @@ SETTING_ROWS = {
 DISPLAY_MODES = ('Windowed', 'Borderless', 'Fullscreen')
 OVERLAY_IDS = tuple(i.id for i in backports_table.MENU if i.tab == 'Overlay')
 SECTIONS = (
-    ('gfx_sec_image', ('s:display_mode', 's:vsync', 'menu:scene_res', 'menu:fsr1', 'menu:rcas',
-                       'menu:rcas_strength')),
+    ('gfx_sec_image', ('s:display_mode', 's:vsync', 'menu:scene_res', 'menu:fsr1', 'menu:rcas', 'menu:rcas_strength',
+                        'TLG_BARRIER_MERGE')),
     ('gfx_sec_rate', ('menu:fps_limit', 'menu:frames_queued')),
     ('gfx_sec_view', tuple(i.id for i in backports_table.MENU if i.tab == 'View')),
     ('gfx_sec_gpu', ('TLG_ASYNC_SHADERS', 'TLG_BACKGROUND_WARMUP', 's:gpu_readbacks', 's:eager_readback',
@@ -212,8 +212,14 @@ class Graphics(QObject):
     @Property('QVariantList', notify=changed)
     def presets(self):
         current = gfxlogic.matching_preset(self.settings, self.backend.fix_states)
-        return [{'id': pid, 'label': self.t('gfx_preset_' + pid), 'what': self.t('gfx_preset_%s_what' % pid),
-                 'active': pid == current, 'standard': pid == gfxlogic.DEFAULT_PRESET} for pid, _, _ in gfxlogic.PRESETS]
+        result = []
+        for pid, _, _ in gfxlogic.PRESETS:
+            preset = gfxlogic.FULL_PRESETS.get(pid, {})
+            result.append({'id': pid, 'label': self.t('gfx_preset_' + pid),
+                           'what': self.t('gfx_preset_%s_what' % pid),
+                           'credit': preset.get('credit', ''), 'creditUrl': preset.get('credit_url', ''),
+                           'active': pid == current, 'standard': pid == gfxlogic.DEFAULT_PRESET})
+        return result
 
     def _imported_name(self):
         """The profile name of the imported file while the options still equal it."""

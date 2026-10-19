@@ -14,10 +14,10 @@ Rectangle {
         { key: "controls", label: "nav_controls" }, { key: "fixes", label: "nav_fixes" },
         { key: "saves", label: "nav_saves" }, { key: "guides", label: "nav_guides" },
         { key: "support", label: "nav_support" }, { key: "updates", label: "nav_updates" },
-        { key: "advanced", label: "nav_advanced" } ]
+        { key: "advanced", label: "nav_advanced" }, { key: "mods", label: "nav_mods" } ]
 
     Column {
-        x: 16; y: 22; width: parent.width - 33; spacing: 6
+        x: 16; y: 22; width: parent.width - 33; spacing: 3
         Item {
             width: parent.width; height: 76
             Column {

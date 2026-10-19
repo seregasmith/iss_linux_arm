@@ -111,6 +111,12 @@ public:
         return registry_generation.load(std::memory_order_acquire);
     }
 
+    /// tlg: changes whenever the collector destroys a sampler, so a memo of resolved samplers
+    /// (SamplerSetMemo in vk_rasterizer.cpp) can drop the ones that would dangle.
+    [[nodiscard]] u64 SamplerGeneration() const noexcept {
+        return sampler_generation.load(std::memory_order_acquire);
+    }
+
     /// tlg: FindImage's access tick for an image found by a memoized lookup. The LRU touch
     /// FindImage also does happens in UpdateImage (FindTexture), which every binding reaches.
     void MarkFound(ImageId image_id) {
@@ -245,9 +251,18 @@ public:
 
     /// Retrieves the sampler that matches the provided S# descriptor.
     /// extra_lod_bias: tlg, added to the S#'s bias (reduced scene rendering).
+    /// lru_id: tlg, receives the sampler's LRU entry for TouchSamplers (SamplerSetMemo).
     [[nodiscard]] vk::Sampler GetSampler(const AmdGpu::Sampler& sampler,
                                          AmdGpu::BorderColorBuffer border_color_base,
-                                         bool is_depth, float extra_lod_bias = 0.0f);
+                                         bool is_depth, float extra_lod_bias = 0.0f,
+                                         u64* lru_id = nullptr);
+
+    /// tlg (SamplerSetMemo): marks the samplers of a memoized set as used, under one lock. A
+    /// memo hit skips GetSampler's hash and map lookup, so it must still keep those LRU entries
+    /// fresh: the collector evicts by age and a recorded command may still reference them.
+    /// False when a sampler was destroyed since `generation` (the ids may be gone or reused),
+    /// which makes the caller resolve the samplers again.
+    bool TouchSamplers(const u64* lru_ids, u32 count, u64 generation);
 
     /// Retrieves the image with the specified id.
     Image* TryGetImage(ImageId id, u64 uid) {
@@ -442,7 +457,7 @@ private:
     void RegisterImage(ImageId image);
 
     /// Unregister image from the page table
-    void UnregisterImage(ImageId image);
+    void UnregisterImage(ImageId image,unsigned perf_reason=0);
 
     /// Track CPU reads and writes for image
     void TrackImage(ImageId image_id);
@@ -462,12 +477,12 @@ private:
     /// Touch the image in the LRU cache.
     void TouchImage(const Image& image);
 
-    void FreeImage(ImageId image_id) {
+    void FreeImage(ImageId image_id,unsigned perf_reason=0) {
         const auto& image = slot_images[image_id];
         ResolveReadbacks(image.info.guest_address, image.info.guest_size, true,
                          ReadbackSource::ImageFree);
         UntrackImage(image_id);
-        UnregisterImage(image_id);
+        UnregisterImage(image_id,perf_reason);
         DeleteImage(image_id);
     }
 
@@ -487,6 +502,9 @@ private:
     Common::SlotVector<ImageView> slot_image_views;
     tsl::robin_map<u64, Sampler> samplers;
     std::unordered_set<ImageId> download_images;
+    /// tlg: !download_images.empty(), stored under download_images_mutex. ProcessDownloadImages
+    /// runs at every fence and skips both locks when nothing is queued or pending.
+    std::atomic<bool> has_download_images{false};
     u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< tlg: pressure report
     std::chrono::steady_clock::time_point gc_report_time{};
@@ -506,6 +524,12 @@ private:
     const bool readback_linear_images;
     const bool deferred_readbacks = [] {
         const char* value = std::getenv("TLG_DEFERRED_READBACK");
+        return value && value[0] == '1';
+    }();
+    /// tlg: TLG_GC_BATCH_DOWNLOAD=1: the collector records the copies of all GPU-written images
+    /// it evicts and waits for the GPU once, instead of once per image (GarbageCollectImages).
+    const bool gc_batch_downloads = [] {
+        const char* value = std::getenv("TLG_GC_BATCH_DOWNLOAD");
         return value && value[0] == '1';
     }();
     /// tlg: TLG_STALE_READBACK=1 (needs deferred readbacks). A pending copy only blocks CPU
@@ -617,6 +641,8 @@ private:
     };
     std::array<FindImageCacheEntry, 1024> find_image_cache{};
     std::atomic<u64> registry_generation{0};
+    /// tlg: bumped when the collector destroys a sampler (SamplerGeneration).
+    std::atomic<u64> sampler_generation{0};
     std::mutex samplers_mutex;
     std::mutex download_images_mutex;
     struct MetaDataInfo {

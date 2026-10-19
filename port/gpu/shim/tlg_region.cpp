@@ -1,3 +1,4 @@
+#include "tlg_perf_trace.h"
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "tlg_region.h"
 
@@ -92,6 +93,12 @@ bool Enabled() {
 }
 
 void NoteOpen(const char* guest_path) {
+    if (guest_path && TlgPerf::Enabled() && IsPackage(guest_path)) {
+        const char* basename = std::strrchr(guest_path, '/');
+        TlgPerf::Event e; e.kind = TlgPerf::Kind::PackageOpen;
+        e.object = TlgPerf::Label(basename ? basename + 1 : guest_path);
+        TlgPerf::Emit(e);
+    }
     if (!guest_path || !Enabled() || !IsPackage(guest_path)) {
         return;
     }

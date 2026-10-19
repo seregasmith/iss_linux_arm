@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "video_core/amdgpu/tlg_amd_1d.h"
+#include <atomic>
 #include <boost/container/small_vector.hpp>
 #include "tlg_toggles.h"
 #include "video_core/buffer_cache/buffer.h"
@@ -112,6 +113,10 @@ Runtime::Runtime(const Instance& instance_, Scheduler& scheduler_)
 
 namespace {
 // tlg: TLG_IMG_TRACE (video_core/amdgpu/tlg_amd_1d.h): every runtime step touching a 1D image.
+// tlg: set by a traced Transit; the next FlushBarriers that has barriers prints the whole batch and
+// each step, because the RX 580 crash (amdvlk64.dll+0xebbbb) comes right after that Transit.
+std::atomic<bool> g_trace_next_flush{false};
+
 bool TraceIs1D(const VideoCore::Image* image) {
     return AmdGpu::ImgTrace() && image && !image->info.props.is_host_2d && image->info.size.height == 1;
 }
@@ -206,7 +211,15 @@ bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
                       vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
                       std::optional<VideoCore::SubresourceRange> subres_range) {
     if (TraceIs1D(image)) {
-        TLG_IMG_TRACE("Transit %p\n", (void*)VkImage(image->GetImage()));
+        const auto& ti = image->info;
+        TLG_IMG_TRACE("Transit %p: %ux%ux%u mips %u layers %u %s guest type %u tile %u host2d %d "
+                      "samples %u at %#llx\n",
+                      (void*)VkImage(image->GetImage()), u32(ti.size.width), u32(ti.size.height),
+                      u32(ti.size.depth), u32(ti.resources.levels), u32(ti.resources.layers),
+                      vk::to_string(ti.pixel_format).c_str(), u32(ti.type), u32(ti.tile_mode),
+                      int(ti.props.is_host_2d), u32(ti.num_samples),
+                      (unsigned long long)ti.guest_address);
+        g_trace_next_flush.store(true, std::memory_order_relaxed);
     }
     BeforeImageAccess();
     if (scene_targets) scene_targets->NativeAccess(*image, dst_access);
@@ -946,8 +959,37 @@ void Runtime::FlushBarriers() {
         return;
     }
 
+    const bool trace_flush = g_trace_next_flush.exchange(false, std::memory_order_relaxed);
+    if (trace_flush) {
+        TLG_IMG_TRACE("FlushBarriers: %u image barriers, memory barrier %d\n",
+                      u32(image_barriers.size()), int(dep_info.memoryBarrierCount));
+        u32 index = 0;
+        for (const auto& b : image_barriers) {
+            if (index >= 12) {
+                break; // a batch can hold thousands; the first few say what it is
+            }
+            TLG_IMG_TRACE("  barrier %u image %p %s -> %s stage %s -> %s access %s -> %s "
+                          "mips %u+%u layers %u+%u aspect %s\n",
+                          index++, (void*)VkImage(b.image), vk::to_string(b.oldLayout).c_str(),
+                          vk::to_string(b.newLayout).c_str(), vk::to_string(b.srcStageMask).c_str(),
+                          vk::to_string(b.dstStageMask).c_str(),
+                          vk::to_string(b.srcAccessMask).c_str(),
+                          vk::to_string(b.dstAccessMask).c_str(), b.subresourceRange.baseMipLevel,
+                          b.subresourceRange.levelCount, b.subresourceRange.baseArrayLayer,
+                          b.subresourceRange.layerCount,
+                          vk::to_string(b.subresourceRange.aspectMask).c_str());
+        }
+        if (image_barriers.size() > 12) {
+            TLG_IMG_TRACE("  ... and %u more barriers\n", u32(image_barriers.size() - 12));
+        }
+        TLG_IMG_TRACE("FlushBarriers: EndRendering\n");
+    }
     scheduler.EndRendering();
+    if (trace_flush) {
+        TLG_IMG_TRACE("FlushBarriers: EndRendering done\n");
+    }
     scheduler.Record([memory = memory_barrier, has_memory = dep_info.memoryBarrierCount != 0,
+                      trace_flush,
                       images = scheduler.RecordData(std::span<const vk::ImageMemoryBarrier2>(
                           image_barriers.data(), image_barriers.size()))](vk::CommandBuffer cmdbuf) {
         const vk::DependencyInfo info = {
@@ -956,7 +998,13 @@ void Runtime::FlushBarriers() {
             .imageMemoryBarrierCount = static_cast<u32>(images.size()),
             .pImageMemoryBarriers = images.data(),
         };
+        if (trace_flush) {
+            TLG_IMG_TRACE("FlushBarriers: pipelineBarrier2 start\n");
+        }
         cmdbuf.pipelineBarrier2(info);
+        if (trace_flush) {
+            TLG_IMG_TRACE("FlushBarriers: pipelineBarrier2 done\n");
+        }
     });
 
     memory_barrier.srcStageMask = vk::PipelineStageFlagBits2::eNone;

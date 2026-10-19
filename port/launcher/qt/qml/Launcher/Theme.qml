@@ -37,7 +37,8 @@ QtObject {
     readonly property color neon: "#ff3d9a"   // Controls
     readonly property color cyan: "#19e3ff"   // Support
     readonly property var accents: ({ play: "#ff6a2b", graphics: "#4d8bff", controls: "#ff3d9a",
-                                      fixes: "#ff6a2b", saves: "#35d07f", guides: "#ff3d9a", support: "#19e3ff", updates: "#f5c400", advanced: "#8e7bff" })
+                                      fixes: "#ff6a2b", saves: "#35d07f", guides: "#ff3d9a", support: "#19e3ff",
+                                      updates: "#f5c400", advanced: "#8e7bff", mods: "#2bd9c4" })
     // type
     property string fontDisplay: Backend.fontDisplay
     property string fontText: Backend.fontText
@@ -53,7 +54,8 @@ QtObject {
         saves: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M12 10.5v5M9.5 13.5 12 16l2.5-2.5",
         support: "M21 12a9 9 0 1 0-18 0a9 9 0 1 0 18 0 M15.5 12a3.5 3.5 0 1 0-7 0a3.5 3.5 0 1 0 7 0 M5.6 5.6l3.9 3.9M14.5 14.5l3.9 3.9M18.4 5.6l-3.9 3.9M9.5 14.5l-3.9 3.9",
         updates: "M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14",
-        advanced: "M4 6h16M4 12h16M4 18h16 M9 6a2 2 0 1 0-4 0a2 2 0 1 0 4 0 M19 12a2 2 0 1 0-4 0a2 2 0 1 0 4 0 M12 18a2 2 0 1 0-4 0a2 2 0 1 0 4 0"
+        advanced: "M4 6h16M4 12h16M4 18h16 M9 6a2 2 0 1 0-4 0a2 2 0 1 0 4 0 M19 12a2 2 0 1 0-4 0a2 2 0 1 0 4 0 M12 18a2 2 0 1 0-4 0a2 2 0 1 0 4 0",
+        mods: "M6 9h12a3 3 0 0 1 0 6H6a3 3 0 0 1 0-6z M17.2 12a2.2 2.2 0 1 0-4.4 0a2.2 2.2 0 1 0 4.4 0"
     })
 
     // Translation: reading Backend.lang inside makes every binding that calls it re-evaluate

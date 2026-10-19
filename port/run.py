@@ -143,7 +143,7 @@ def main():
         sys.exit(20)
     missing = parse_cpu_features(features.stdout)
 
-    game = Path(env.get('TLG_GAME_DIR', PORT.parent / 'CUSA01623'))
+    game = Path(env.get('TLG_GAME_DIR', PORT.parent / 'game' / 'CUSA00223'))
     if not (game / 'eboot.bin').is_file():
         fail(f'No eboot.bin in {game} (set TLG_GAME_DIR).')
     original_game = game.resolve()

@@ -12,9 +12,11 @@ import infamous_run as run  # noqa: E402
 
 class SystemGameLanguageTests(unittest.TestCase):
     def test_locale_mapping(self):
-        cases = {'pt_BR.UTF-8': 'pt_BR', 'pt_PT': 'pt_BR', 'es_MX': 'es_LA', 'es_ES': 'es_LA', 'fr_FR': 'fr_CA',
-                 'fr_CA': 'fr_CA', 'tr_TR': 'tr', 'ru_RU': 'ru', 'en_US': 'en', 'de_DE': 'en', 'C': 'en', 'POSIX': 'en',
-                 'pt-BR': 'pt_BR', 'ru-RU': 'ru'}
+        cases = {'pt_BR.UTF-8': 'pt_BR', 'pt_PT': 'pt_PT', 'pt': 'pt_BR', 'es_MX': 'es_LA', 'es_ES': 'es',
+                 'es': 'es_LA', 'fr_FR': 'fr', 'fr_CA': 'fr_CA', 'tr_TR': 'tr', 'ru_RU': 'ru', 'en_US': 'en',
+                 'en_GB': 'en_GB', 'de_DE': 'de', 'it_IT': 'it', 'pl_PL': 'pl', 'nb_NO': 'no', 'zh_TW': 'zh_TW',
+                 'zh_CN': 'zh_CN', 'ja_JP': 'ja', 'C': 'en', 'POSIX': 'en', 'pt-BR': 'pt_BR', 'ru-RU': 'ru',
+                 'Portuguese_Brazil': 'pt_BR', 'Spanish_Spain': 'es', 'Italian_Italy': 'it', 'eo': 'en'}
         for value, expected in cases.items():
             self.assertEqual(expected, run.system_game_language({'LANG': value}), value)
 
@@ -38,7 +40,17 @@ class SystemGameLanguageTests(unittest.TestCase):
         self.assertEqual('tr', run.resolve_game_language({}, env))
         self.assertEqual('pt_BR', run.resolve_game_language({'game_language': 'pt_BR'}, env))   # kept
         self.assertEqual('tr', run.resolve_game_language({'game_language': 'klingon'}, env))    # invalid
+        # No game folder: the CUSA00223 set, which has neither German nor French from France
         self.assertEqual('en', run.resolve_game_language({'game_language': 'auto'}, {'LANG': 'de_DE'}))
+        self.assertEqual('fr_CA', run.resolve_game_language({'game_language': 'auto'}, {'LANG': 'fr_FR'}))
+        self.assertEqual('pl', run.resolve_game_language({'game_language': 'pl'}, env))         # kept
+
+    def test_every_ps4_language_has_a_choice(self):
+        self.assertEqual(list(range(30)), sorted(run.GAME_LANGUAGES.values()))
+        with mock.patch.dict(os.environ):
+            os.environ.pop('ISS_LANGUAGE', None)
+            self.assertEqual('16', run.build_env(dict(run.DEFAULT_SETTINGS, game_language='pl'))['ISS_LANGUAGE'])
+            self.assertEqual('3', run.build_env(dict(run.DEFAULT_SETTINGS, game_language='es'))['ISS_LANGUAGE'])
 
     def test_build_env(self):
         with mock.patch.dict(os.environ, {'LC_ALL': 'es_MX.UTF-8'}):

@@ -37,13 +37,16 @@ inline constexpr const char* kExtraKeys[] = {"wqm", "lds_small", "lds_multi", "l
 inline constexpr int kExtraPrefs = sizeof(kExtraKeys) / sizeof(kExtraKeys[0]);
 
 struct Values {
-    std::atomic<int> upscaler{UpscalerFsr3};
+    /// Off / no object motion, as the launcher's ISS_UPSCALER=off and ISS_OBJECT_MOTION=0 set
+    /// them: a direct run (run.sh, the probe) must not pay the native-AA FSR 3 render and the
+    /// ~10% object motion cost (jitter only matters while an upscaler runs).
+    std::atomic<int> upscaler{UpscalerOff};
     std::atomic<int> preset{NativeAA};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.3f};
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
-    std::atomic<bool> object_motion{true};
+    std::atomic<bool> object_motion{false};
     std::atomic<float> reactive_scale{1.0f};
     std::atomic<float> reactive_threshold{0.2f};
     std::atomic<float> reactive_max{0.9f};

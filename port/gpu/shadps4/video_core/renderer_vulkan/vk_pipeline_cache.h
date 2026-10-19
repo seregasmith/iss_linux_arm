@@ -269,6 +269,12 @@ private:
     std::unique_ptr<AsyncCompiler> compiler, capture_compiler;
     std::vector<vk::UniquePipelineCache> worker_pipeline_caches;
     bool worker_caches_seeded = false;
+    /// tlg: main-cache pipelines (sync compiles and warm-up builds) the workers were seeded with;
+    /// the merges repeat once this grows (SeedWorkerCaches).
+    u64 worker_seed_marker = 0;
+    /// tlg: pipelines the background warm-up built into the main cache (PumpWarmUp), counted with
+    /// num_new_pipelines for the re-seed above.
+    u64 warmup_pipelines_loaded = 0;
     struct DriverCacheSaver;
     DriverCacheSaver* driver_saver = nullptr; ///< tlg: BP08
     /// tlg: TLG_PARALLEL_WARMUP: WarmUp builds the cached pipelines on these threads.
@@ -287,8 +293,7 @@ private:
     /// overwritten with another specialization, and the .key files that name it would build
     /// their pipelines with the wrong shader in the next session. Filled by CheckCacheProfile.
     std::unordered_map<u64, size_t> next_permutation;
-    /// tlg: precompiled cache: programs load on first use (LoadProgramFromCache), not at the start.
-    bool lazy_programs = false;
+    /// tlg: precompiled cache: a program loads its cached .spv on first use (LoadProgramFromCache).
     std::unordered_set<u64> lazy_tried;
     std::vector<Program*> pending_programs;
     /// tlg: exclusive for program/permutation insertions, shared for worker lookups.

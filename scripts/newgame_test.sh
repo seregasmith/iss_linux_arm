@@ -9,7 +9,7 @@ pad=$root/port/out/pad_input.txt
 : > "$pad"
 export TLG_PAD_FILE=$pad
 press() { echo "$1" > "$pad"; sleep "${2:-0.25}"; : > "$pad"; sleep 0.6; echo "[$(date +%T)] apertou $1"; }
-"$root/run_tlg.sh" $((menu_wait + play + 15)) > /dev/null 2>&1 &
+"$root/run_infamous.sh" $((menu_wait + play + 15)) > /dev/null 2>&1 &
 game=$!
 sleep "$menu_wait"
 press up; press cross

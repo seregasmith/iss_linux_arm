@@ -37,7 +37,8 @@ Tudo vem do **seu** PS4 (GoldHEN + Itemzflow). Nada disso vai no download. Use *
 2. Abra **inFAMOUS Second Son** (`inFAMOUS Second Son.exe` no Windows). No Windows, se aparecer "O Windows protegeu o computador", clique em *Mais informações* e depois em *Executar assim mesmo*. O programa não é assinado digitalmente.
 3. Em **Pasta do jogo**, escolha a pasta que tem o `eboot.bin` e clique em **Jogar**.
 
-O launcher tem 8 telas: **Jogar**, **Gráficos**, **Controles**, **Correções**, **Saves e dados**, **Guias de controle**, **Suporte** e **Atualizações**. O launcher antigo continua na mesma pasta como **inFAMOUS Second Son (classic)**: use-o se o novo não abrir.
+O launcher tem 10 telas, incluindo **Mods / Cheats** e **Avançado**. O launcher antigo continua na mesma pasta como **inFAMOUS Second Son (classic)**: use-o se o novo não abrir.
+- **Pular vídeo inicial:** na tela **Mods / Cheats**, ative **Skip intro movie**. Isso pula apenas o vídeo de logos antes do menu; não pula as cutscenes da história. Vem desligado por padrão.
 
 - **Idioma do jogo:** por padrão é o do seu sistema ("Automático"); dá para escolher English, Português (Brasil), Español (Latinoamérica), Français (Canada), Türkçe ou Русский na tela **Jogar**. Só funciona se os arquivos do seu jogo tiverem o idioma. A interface do launcher é em português ou inglês.
 - **Saves:** ficam em `user/`, ao lado do jogo. A atualização não apaga nada, mas **extrair o zip novo em outra pasta faz o jogo abrir sem saves** (eles continuam na pasta antiga, em `user/savedata`). Para atualizar sem perder nada, abra **Saves e dados**, faça um backup e escolha uma pasta fixa fora do jogo (a tela copia seus saves para lá); ela também acha saves de outras pastas, importa e exporta `.zip` e faz backup antes de cada partida.
@@ -98,7 +99,8 @@ Everything comes from **your own** PS4 (GoldHEN + Itemzflow). None of it is in t
 2. Open **inFAMOUS Second Son** (`inFAMOUS Second Son.exe` on Windows). On Windows, if "Windows protected your PC" appears, click *More info*, then *Run anyway*. The program is not digitally signed.
 3. Under **Game folder**, choose the folder that has `eboot.bin` and click **Play**.
 
-The launcher has 8 screens: **Play**, **Graphics**, **Controls**, **Fixes**, **Saves & data**, **Controller guides**, **Support** and **Updates**. The old launcher stays in the same folder as **inFAMOUS Second Son (classic)**: use it if the new one does not open.
+The launcher has 10 screens, including **Mods / Cheats** and **Advanced**. The old launcher stays in the same folder as **inFAMOUS Second Son (classic)**: use it if the new one does not open.
+- **Skip the boot intro:** on **Mods / Cheats**, enable **Skip intro movie**. This skips only the logo video before the title screen; story cutscenes are unchanged. It is off by default.
 
 - **Game language:** it follows your system by default ("Automatic"); you can pick English, Português (Brasil), Español (Latinoamérica), Français (Canada), Türkçe or Русский on the **Play** screen. It only works if your game files have that language. The launcher interface is in Portuguese or English.
 - **Saves:** they live in `user/`, next to the game. Updating deletes nothing, but **extracting the new zip into another folder makes the game open without saves** (they stay in the old folder, under `user/savedata`). To update without losing anything, open **Saves & data**, make a backup and pick a fixed folder outside the game (the screen copies your saves there); it also finds saves in other folders, imports and exports `.zip`, and backs up before every play session.
@@ -131,3 +133,10 @@ For the graffiti, absorbing powers (smoke, neon...), opening doors and other sen
 ---
 
 This project is not affiliated with Sony Interactive Entertainment or Sucker Punch Productions. inFAMOUS is a trademark of Sony Interactive Entertainment. / Este projeto não tem vínculo com a Sony Interactive Entertainment ou a Sucker Punch Productions.
+
+## Apoie o desenvolvimento / Support development
+
+☕ [Apoie com um café / Buy me a coffee](https://buymeacoffee.com/hayatog)
+
+Apoio opcional para continuar desenvolvendo os ports. Os ports continuam gratuitos.
+Optional support for continued port development. The ports remain free.

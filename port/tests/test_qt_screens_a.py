@@ -254,8 +254,27 @@ VkPhysicalDeviceMemoryProperties:
             for item_id, value in items.items():       # a value the table accepts (not silently dropped)
                 item = gfxlogic.item_by_id(item_id)
                 self.assertIn(value, [item.default] + [c[0] for c in item.choices] + ['0', '1'], item_id)
-        self.assertEqual(('rec1', 'current', 'amd', 'seco', 'performance', 'balanced', 'quality', 'ps4'),
+        self.assertEqual(('rec1', 'current', 'amd', 'rx580', 'seco', 'apolar_amd', 'apolar_rtx', 'apolar_gtx',
+                          'performance', 'balanced', 'quality', 'ps4'),
                          tuple(p[0] for p in gfxlogic.PRESETS))
+
+    def test_apolar_profiles_are_complete_and_credit_the_contributor(self):
+        expected = {
+            'apolar_amd': (True, '30', '1500000', None, 86),
+            'apolar_rtx': (True, '30', '600000', '1', 86),
+            'apolar_gtx': (False, '24', '400000', '1', 82),
+        }
+        for preset_id, (vsync, fps, far_clip, linear, item_count) in expected.items():
+            source = gfxlogic.FULL_PRESETS[preset_id]
+            self.assertEqual('Apolar', source['credit'])
+            self.assertEqual('https://github.com/sapoguruoficial-cmd', source['credit_url'])
+            self.assertEqual(item_count, len(source['items']))
+            settings, items = gfxlogic.preset_targets(preset_id)
+            self.assertEqual((vsync, True, '2'),
+                             (settings['vsync'], settings['show_fps'], settings['gpu_readbacks']))
+            self.assertEqual((fps, far_clip, linear),
+                             (items['menu:fps_limit'], items['menu:far_clip'], items['TLG_READBACK_LINEAR']))
+            self.assertEqual(preset_id, gfxlogic.matching_preset(settings, items))
 
     def test_current_preset_is_the_maintainers_setup_and_plain_presets_leave_its_keys_alone(self):
         import infamous_run
@@ -434,7 +453,7 @@ class ControllerTests(unittest.TestCase):
         for rid in ('s:display_mode', 's:vsync', 's:show_fps', 's:gpu_readbacks', 's:eager_readback',
                     's:write_merge', 's:vram_budget_mb', 'menu:fsr1', 'menu:rcas', 'menu:rcas_strength',
                     'menu:fps_limit', 'menu:frames_queued', 'TLG_ASYNC_SHADERS', 'TLG_DEFERRED_READBACK',
-                    'TLG_STALE_READBACK', 'TLG_BACKGROUND_WARMUP', 'menu:overlay_corner'):
+                    'TLG_STALE_READBACK', 'TLG_BACKGROUND_WARMUP', 'TLG_BARRIER_MERGE', 'menu:overlay_corner'):
             self.assertIn(rid, ids)
         self.assertEqual(len(ids), len(set(ids)))
         for row in self.graphics.model.rows:
@@ -476,6 +495,26 @@ class ControllerTests(unittest.TestCase):
         self.backend.setFix('TLG_STALE_READBACK', '1')
         self.assertTrue(self.graphics.model.get('TLG_STALE_READBACK')['on'])
         self.assertTrue(self.graphics.model.get('TLG_STALE_READBACK')['changed'])
+
+    def test_rx580_toggle_shares_and_persists_the_advanced_setting(self):
+        item_id = 'TLG_BARRIER_MERGE'
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('ISS_BARRIER_MERGE', None)
+            os.environ.pop('TLG_BARRIER_MERGE', None)
+            row = self.graphics.model.get(item_id)
+            self.assertFalse(row['on'])
+            self.assertFalse(row['changed'])
+
+            self.graphics.setValue(item_id, '1')
+            self.assertIn('adv_barrier_merge=1', self.ini_text())
+            self.assertTrue(self.graphics.model.get(item_id)['on'])
+            self.assertEqual('1', logic.tlg_run.build_env(self.backend.settings)['ISS_BARRIER_MERGE'])
+
+            self.backend.setFix(item_id, '0')
+            self.assertNotIn('adv_barrier_merge=', self.ini_text())
+            self.assertFalse(self.graphics.model.get(item_id)['on'])
+            self.assertFalse(self.graphics.model.get(item_id)['changed'])
+            self.assertNotIn('ISS_BARRIER_MERGE', logic.tlg_run.build_env(self.backend.settings))
 
     def test_sharpness_strength_is_disabled_without_rcas(self):
         self.assertFalse(self.graphics.model.get('menu:rcas_strength')['disabled'])

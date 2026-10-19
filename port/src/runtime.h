@@ -150,6 +150,16 @@ typedef struct RuntimeWaitLevel {
 typedef struct RuntimeWait {
     unsigned depth;             /* nesting; levels past RUNTIME_WAIT_LEVELS are only counted */
     uint32_t generation;        /* changes on every begin/end: readers detect a torn copy */
+    /* TLG_WAIT_STATS=1 only (0 otherwise): what this thread spent blocked in marked waits, so a
+     * stutter can be attributed to a thread and to the object it waited for. The outermost wait
+     * is the one that counts (nested ones are inside it). */
+    uint64_t wait_start_ns;     /* start of the outermost wait in progress (0: none counted) */
+    uint64_t wait_ns;           /* summed time blocked */
+    uint64_t wait_max_ns;       /* the longest single wait */
+    uint64_t wait_max_end_ms;   /* runtime_wait_now_ms() when that wait ended */
+    uint32_t wait_count;        /* marked waits counted */
+    const char *wait_max_kind;  /* static text of the longest wait (NULL: none yet) */
+    char wait_max_name[48];     /* its object name, if any */
     RuntimeWaitLevel level[RUNTIME_WAIT_LEVELS];
 } RuntimeWait;
 /* Frame of the calling (guest-called) function, for runtime_wait_begin. Use it in the ABI

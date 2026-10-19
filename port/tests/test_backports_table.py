@@ -100,6 +100,19 @@ class StatesTest(unittest.TestCase):
         self.assertEqual(t.environment(states), {})
         self.assertTrue(all(v is None for v in t.ini_updates(states).values()))
 
+    def test_rx580_diagnostic_controls_round_trip_and_external_env_wins(self):
+        states = t.read_states({'adv_explicit_range': '0', 'adv_barrier_split': '2', 'adv_barrier_merge': '1'})
+        expected = {'ISS_EXPLICIT_RANGE': '0', 'ISS_BARRIER_SPLIT': '2', 'ISS_BARRIER_MERGE': '1'}
+        self.assertEqual(t.environment(states, {}), expected)
+        for key, value in expected.items():
+            self.assertNotIn(key, t.environment(states, {key: value}))
+            self.assertNotIn(key, t.environment(states, {key.replace('ISS_', 'TLG_'): value}))
+        defaults = t.read_states({'adv_explicit_range': '1', 'adv_barrier_split': '0', 'adv_barrier_merge': '0'})
+        self.assertEqual(t.environment(defaults, {}), {})
+        split = next(i for i in t.ITEMS if i.id == 'TLG_BARRIER_SPLIT')
+        self.assertIsNone(t.normalize(split, '3'))
+        self.assertIsNone(t.normalize(split, '-1'))
+
     def test_value_equal_to_default_is_dropped(self):
         states = t.read_states({'bp01': '1', 'bp06': '1', 'bp12': '0', 'overlay_corner': '1', 'rcas_strength': '60'})
         self.assertTrue(all(v is None for v in states.values()))

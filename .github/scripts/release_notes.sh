@@ -15,14 +15,23 @@ set -euo pipefail
 sha=$1
 prev=${PREV:-}; [[ -n $prev ]] || prev=$(gh release list --exclude-drafts --limit 20 --json tagName --jq '.[].tagName' | grep -vx nightly | head -1 || true)
 if [[ -n $prev ]]; then
-  commits=$(gh api "repos/$GH_REPO/compare/$prev...$sha" --jq '.commits[].sha')
+  commits=$(gh api --paginate "repos/$GH_REPO/compare/$prev...$sha?per_page=100" --jq '.commits[].sha')
 else
   commits=$sha
 fi
-prs=$(for c in $commits; do gh api "repos/$GH_REPO/commits/$c/pulls" --jq '.[] | select(.merged_at != null) | .number'; done | sort -un)
+# Fail on any API error instead of publishing a partial changelog.
+pr_numbers=""
+for c in $commits; do
+  numbers=$(gh api "repos/$GH_REPO/commits/$c/pulls" --jq '.[] | select(.merged_at != null) | .number')
+  pr_numbers+="$numbers"$'\n'
+done
+prs=$(printf '%s' "$pr_numbers" | sed '/^$/d' | sort -un)
 
 block() {  # block <body> <lang>
-  awk -v start="<!-- notes:$2 -->" 'index($0, start) {on=1; next} /<!-- \/notes -->/ {on=0} on && /^[[:space:]]*- / {sub(/^[[:space:]]*/, ""); print}' <<<"$1"
+  awk -v start="<!-- notes:$2 -->" '
+    /<!--[[:space:]]*\/?notes[: >]/ {on=index($0, start)>0; next}
+    on && /^[[:space:]]*-[[:space:]]+[^[:space:]]/ {sub(/^[[:space:]]*/, ""); print}
+  ' <<<"$1"
 }
 declare -A authors
 pt=""; en=""
@@ -32,7 +41,8 @@ for n in $prs; do
   p=$(block "$body" pt-BR); e=$(block "$body" en-US)
   [[ -n $p ]] || p="- $title"
   [[ -n $e ]] || e="- $title"
-  pt+="${p} (PR #$n)"$'\n'; en+="${e} (PR #$n)"$'\n'
+  while IFS= read -r line; do pt+="$line (PR #$n)"$'\n'; done <<<"$p"
+  while IFS= read -r line; do en+="$line (PR #$n)"$'\n'; done <<<"$e"
   # Issues: the ones the PR closes plus every #N its notes mention.
   for i in $(jq -r '.closingIssuesReferences[]?.number' <<<"$json") $(grep -o '#[0-9]\+' <<<"$p$e" | tr -d '#'); do
     [[ -n ${authors[$i]:-} ]] && continue
@@ -43,7 +53,7 @@ done
 [[ -n $prs ]] || exit 0
 
 thanks=""
-for i in $(printf '%s\n' "${!authors[@]}" | sort -n); do thanks+="#$i (@${authors[$i]}), "; done
+for i in $(printf '%s\n' "${!authors[@]}" | sed '/^$/d' | sort -n); do thanks+="#$i (@${authors[$i]}), "; done
 thanks=${thanks%, }
 
 echo "## Novidades"

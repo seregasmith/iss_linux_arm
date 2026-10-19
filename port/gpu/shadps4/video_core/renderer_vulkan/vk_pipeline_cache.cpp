@@ -1,3 +1,4 @@
+#include "tlg_perf_trace.h"
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -108,6 +109,19 @@ static void LogEmulatedFloatAtomics(const Shader::Info& info, const Shader::Prof
         LOG_INFO(Render_Vulkan, "{} shader {:#x} does float atomic min/max with integer atomics",
                  info.hw_stage, info.pgm_hash);
     }
+}
+
+// tlg: "vs 9d2f0b1c8a4e, fs 1122334455aa" for the per-compile line: one graphics pipeline
+// compiles all of its stages at once.
+static std::string DescribeStages(const std::array<const Shader::Info*, MaxShaderStages>& infos) {
+    std::string described;
+    for (const Shader::Info* info : infos) {
+        if (info) {
+            described += fmt::format("{}{} {:#x}", described.empty() ? "" : ", ", info->hw_stage,
+                                     info->pgm_hash);
+        }
+    }
+    return described;
 }
 
 static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsOutputControl& ctl) {
@@ -426,12 +440,18 @@ std::vector<u8> LoadDriverCacheBlob(const Instance& instance) {
 }
 } // namespace
 
+std::atomic<u64> g_tlg_driver_pipelines_created{0};
+
 struct PipelineCache::DriverCacheSaver {
     std::thread thread;
     std::mutex mutex;
     std::condition_variable cv;
     bool stop = false;
     u64 saved_hash = 0; ///< XXH3 of the last blob written (or loaded): unchanged data is not rewritten
+    /// g_tlg_driver_pipelines_created at the last save: nothing new means nothing to merge, copy
+    /// or hash (a whole-game blob is ~300 MB, and the save ran every minute regardless).
+    u64 saved_created = ~0ull;
+    bool over_limit_logged = false;
 };
 
 bool PipelineCache::SaveDriverCache() {
@@ -448,6 +468,10 @@ bool PipelineCache::SaveDriverCache() {
 bool PipelineCache::SaveDriverCacheUnchecked() {
     // Pipelines the compiler workers built are only merged into pipeline_cache when they finish
     // (FinishCompilations): merge copies of all of them into a scratch cache for the blob.
+    const u64 created = g_tlg_driver_pipelines_created.load(std::memory_order_relaxed);
+    if (driver_saver && created == driver_saver->saved_created) {
+        return true;
+    }
     const auto device = instance.GetDevice();
     auto [scratch_result, scratch] = device.createPipelineCacheUnique({});
     if (scratch_result != vk::Result::eSuccess) {
@@ -464,8 +488,28 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
     if (result != vk::Result::eSuccess || blob.size() < sizeof(VkPipelineCacheHeaderVersionOne)) {
         return false;
     }
+    // tlg: TLG_DRIVER_CACHE_MAX_MB (default 1024, 0 = no limit): a bigger blob is not written,
+    // so the file never grows past it (the saved one keeps loading). Vulkan has no way to evict
+    // entries from a pipeline cache; deleting the file starts it again.
+    static const u64 max_bytes = [] {
+        const char* v = std::getenv("TLG_DRIVER_CACHE_MAX_MB");
+        return u64(v && *v ? std::max(0, std::atoi(v)) : 1024) << 20;
+    }();
+    if (max_bytes && blob.size() > max_bytes) {
+        if (driver_saver && !driver_saver->over_limit_logged) {
+            driver_saver->over_limit_logged = true;
+            std::printf("GPU: driver pipeline cache not saved: %zu MB is over the %llu MB limit "
+                        "(TLG_DRIVER_CACHE_MAX_MB)\n",
+                        blob.size() >> 20, static_cast<unsigned long long>(max_bytes >> 20));
+        }
+        if (driver_saver) {
+            driver_saver->saved_created = created;
+        }
+        return false;
+    }
     const u64 hash = XXH3_64bits(blob.data(), blob.size());
     if (driver_saver && hash == driver_saver->saved_hash) {
+        driver_saver->saved_created = created;
         return true;
     }
     const auto path = DriverCacheFile(instance);
@@ -490,6 +534,7 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
     }
     if (driver_saver) {
         driver_saver->saved_hash = hash;
+        driver_saver->saved_created = created;
     }
     LOG_INFO(Render_Vulkan, "tlg: driver pipeline cache saved ({} bytes)", blob.size());
     return true;
@@ -544,7 +589,13 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .max_viewport_height = instance.GetMaxViewportHeight(),
         .max_shared_memory_size = instance.MaxComputeSharedMemorySize(),
         .supported_spirv = SpirvVersion1_6,
-        .subgroup_size = instance.SubgroupSize(),
+        // tlg: the size compute is created at, not the device default: the compute pipeline asks
+        // for 64 whenever the driver allows it (vk_compute_pipeline.cpp), and devices whose
+        // default subgroup size is 32 with 64 supported used to get the 32-lane wave64 lowering
+        // while the shader ran 64-wide. Only the compute-only passes read this
+        // (lower_wave64_pass.cpp, shared_memory_barrier_pass.cpp). Changing it changes the
+        // profile that is stored in the shader cache: one-time invalidation.
+        .subgroup_size = instance.ComputeSubgroupSize(),
         .sparse_page_shift = sparse_page_shift,
         .support_int8 = instance.IsShaderInt8Supported(),
         .support_int16 = instance.IsShaderInt16Supported(),
@@ -611,7 +662,13 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         std::printf("GPU: shader switch %s=%d (%s)\n", name, on ? 1 : 0, what);
     });
     Common::Backports::LogStates();
-    std::printf("GPU: host subgroup size %u, LDS barriers %s\n", profile.subgroup_size,
+    // tlg: the size the shaders are lowered for (profile.subgroup_size, see above) next to the
+    // device's default and the stages a required size may be set on: a device that defaults to 32
+    // but lists compute in requiredSubgroupSizeStages is lowered for 64.
+    std::printf("GPU: host subgroup size %u (device default %u, min %u, max %u, required-size stages "
+                "0x%x), LDS barriers %s\n",
+                profile.subgroup_size, instance.SubgroupSize(), instance.MinSubgroupSize(),
+                instance.MaxSubgroupSize(), static_cast<u32>(instance.RequiredSubgroupSizeStages()),
                 profile.needs_lds_barriers ? "on" : "off");
 
     // tlg: BP08, start from the driver blob saved by an earlier session (same GPU and driver).
@@ -633,13 +690,6 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);
-    if (Common::Backports::On(Common::Backports::Id::PipelineCacheBlob)) {
-        StartDriverCacheSaver();
-        if (!driver_blob.empty()) {
-            driver_saver->saved_hash = XXH3_64bits(driver_blob.data(), driver_blob.size());
-            Common::Backports::Hit(Common::Backports::Id::PipelineCacheBlob);
-        }
-    }
     // tlg: the compiler threads always exist; the in-game menu switches async compilation live
     // (TlgSettings::async_shaders, TLG_ASYNC_SHADERS at start).
     {
@@ -650,16 +700,34 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
             ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create compiler pipeline cache");
             worker_pipeline_caches.push_back(std::move(worker_cache));
         }
+        const auto trace_hooks = [](std::uint64_t label) {
+            AsyncCompiler::TraceHooks hooks;
+            if (TlgPerf::Enabled()) {
+                hooks.enqueued = [label](bool priority,size_t depth) { return TlgPerf::Enqueue(label,priority,depth); };
+                hooks.begin = [label](std::uint64_t op) { return TlgPerf::QueueBegin(op,label); };
+                hooks.end = [label](std::uint64_t op,std::uint64_t parent) { TlgPerf::QueueEnd(op,parent,label); };
+            }
+            return hooks;
+        };
         capture_compiler = std::make_unique<AsyncCompiler>(capture_count, 8, [](unsigned index) {
             Common::SetCurrentThreadName(("tlg:ShaderCapture" + std::to_string(index)).c_str());
             Common::SetCurrentThreadPriority(Common::ThreadPriority::High);
-        });
+        }, trace_hooks(TlgPerf::Label("shader_capture")));
         compiler = std::make_unique<AsyncCompiler>(count, 64, [](unsigned index) {
             Common::SetCurrentThreadName(("tlg:ShaderCompile" + std::to_string(index)).c_str());
             Common::SetCurrentThreadPriority(Common::ThreadPriority::Low);
-        });
+        }, trace_hooks(TlgPerf::Label("shader_compile")));
         LOG_INFO(Render_Vulkan, "tlg: async graphics compilation ready ({} capture, {} compile workers)",
                  capture_count, count);
+    }
+    // tlg: the saver thread reads worker_pipeline_caches (SaveDriverCacheUnchecked): start it only
+    // once the list is complete, it would read the vector while this thread grows it otherwise.
+    if (Common::Backports::On(Common::Backports::Id::PipelineCacheBlob)) {
+        StartDriverCacheSaver();
+        if (!driver_blob.empty()) {
+            driver_saver->saved_hash = XXH3_64bits(driver_blob.data(), driver_blob.size());
+            Common::Backports::Hit(Common::Backports::Id::PipelineCacheBlob);
+        }
     }
 }
 
@@ -697,7 +765,15 @@ struct PhaseTimer {
     ~PhaseTimer() { Stop(); }
 };
 struct CompileTimer {
+    TlgPerf::Span perf;
+    explicit CompileTimer(u64 object=0,u64 kind=0)
+        : perf{TlgPerf::Kind::CompileBegin,TlgPerf::Kind::CompileEnd,object,kind} {}
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    /// tlg: this one compile's time, for the per-compile line (below).
+    double Ms() const {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+            .count();
+    }
     ~CompileTimer() {
         g_tlg_compile_ns += u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                    std::chrono::steady_clock::now() - start)
@@ -810,6 +886,7 @@ bool PipelineCache::QueueShader(Program& program, HwStage stage, SwStage l_stage
     }
     const bool queued = build->job.Start(*compiler, [this, build] {
         PhaseTimer compile{g_tlg_async_ns};
+        const auto started = std::chrono::steady_clock::now();
         Shader::Gcn::ScopedFetchShaderSnapshot snapshot{build->fetch};
         auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, build->runtime, *build->ir,
                                                     build->binding);
@@ -820,6 +897,11 @@ bool PipelineCache::QueueShader(Program& program, HwStage stage, SwStage l_stage
                                     build->permutation, "spv");
         build->module = CompileSPV(patch && EmulatorSettings.IsPatchShaders() ? *patch : spv,
                                     instance.GetDevice());
+        // tlg: which background compile a stutter belongs to (TLG_GPU_LOG=info/debug).
+        LOG_INFO(Render_Vulkan, "tlg: compiled {} shader {:#x} perm {} in {:.1f} ms",
+                 build->info.hw_stage, build->info.pgm_hash, build->permutation,
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+                     .count());
         build->binary = std::move(spv);
         build->ir.reset();
         compiler_pools.Recycle(std::move(build->pools));
@@ -932,7 +1014,30 @@ bool PipelineCache::AsyncCompilation() const {
 }
 
 void PipelineCache::SeedWorkerCaches() {
-    if (!compiler || worker_caches_seeded) {
+    if (!compiler) {
+        return;
+    }
+    // tlg: the main cache grows while the game runs (compiles on the GPU thread, the warm-up's
+    // builds): a worker that did not see the new pipelines compiles shaders the driver already
+    // had. Everything up to the last merge it was seeded with is counted here.
+    // A merge copies the whole main cache on the GPU command thread, so the re-seed is opt-in
+    // (TLG_RESEED_WORKER_CACHES=1); by default the workers are seeded once, at the first draw.
+    static const bool reseed = [] {
+        const char* v = std::getenv("TLG_RESEED_WORKER_CACHES");
+        const bool on = v && v[0] == '1';
+        if (on) {
+            std::printf("GPU: worker pipeline caches re-seeded after bursts "
+                        "(TLG_RESEED_WORKER_CACHES=1)\n");
+        }
+        return on;
+    }();
+    const u64 built = num_new_pipelines + warmup_pipelines_loaded;
+    if (worker_caches_seeded && (!reseed || built == worker_seed_marker)) {
+        return;
+    }
+    // Merging into a cache compiler threads are creating with is not a documented-safe call:
+    // re-seed once they are idle, which is when a burst of new pipelines has just ended.
+    if (worker_caches_seeded && compiler->Depth() != 0) {
         return;
     }
     for (const auto& cache : worker_pipeline_caches) {
@@ -940,6 +1045,7 @@ void PipelineCache::SeedWorkerCaches() {
         ASSERT_MSG(result == vk::Result::eSuccess, "Failed to seed compiler pipeline cache");
     }
     worker_caches_seeded = true;
+    worker_seed_marker = built;
 }
 
 void PipelineCache::ReportCompilerStats() {
@@ -1204,12 +1310,23 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         return nullptr;
     }
     // tlg: region trace (TLG_REGION_TRACE=1): the first request of each pipeline.
+    if (TlgPerf::Enabled() && !graphics_pipelines.contains(sel.graphics_key)) {
+        TlgPerf::Event e; e.kind = TlgPerf::Kind::PipelineRequest;
+        e.object = std::hash<GraphicsPipelineKey>{}(sel.graphics_key);
+        e.a = 'g'; e.b = pending_graphics.contains(sel.graphics_key) ? 1 : 0;
+        TlgPerf::Emit(e);
+    }
     TlgRegion::NotePipeline('g', std::hash<GraphicsPipelineKey>{}(sel.graphics_key),
                             graphics_pipelines.contains(sel.graphics_key));
     if (Precompile::CaptureEnabled() && !graphics_pipelines.contains(sel.graphics_key)) {
         Precompile::CaptureGraphics(sel);
     }
-    if (AsyncCompilation() && !sel.regs->stage_enable.hs_en && !EmulatorSettings.IsShaderCollect()) {
+    // tlg: TLG_GFX_DEFERRED_BIND: the pipeline is built on a compiler thread when the driver's
+    // cache misses it, so this draw waits for it at the bind rather than being skipped: the
+    // asynchronous path above, which skips it, is left for the case where that is not possible.
+    const bool deferred_bind = GraphicsDeferredBindEnabled(instance, scheduler);
+    if (AsyncCompilation() && !sel.regs->stage_enable.hs_en && !EmulatorSettings.IsShaderCollect() &&
+        !deferred_bind) {
         const auto found = graphics_pipelines.find(sel.graphics_key);
         if (found != graphics_pipelines.end()) {
             return found->second.get();
@@ -1250,11 +1367,18 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
                 // Only the vertex stage uses fetch-shader guest pointers during pipeline construction.
                 Shader::Gcn::ScopedFetchShaderSnapshot snapshot{build->fetch[u32(SwStage::Vertex)]};
                 PhaseTimer compile{g_tlg_async_ns};
+                const auto started = std::chrono::steady_clock::now();
                 auto& s = build->selection;
                 build->pipeline = std::make_unique<GraphicsPipeline>(
                     instance, scheduler, desc_heap, profile, s.graphics_key,
                     *worker_pipeline_caches[AsyncCompiler::WorkerIndex()],
                     s.infos, s.runtime_infos, s.fetch_shader, s.modules, build->data, false);
+                // tlg: which background compile a stutter belongs to (TLG_GPU_LOG=info/debug).
+                LOG_INFO(Render_Vulkan, "tlg: compiled graphics pipeline {:#x} ({}) in {:.1f} ms",
+                         std::hash<GraphicsPipelineKey>{}(s.graphics_key), DescribeStages(s.infos),
+                         std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - started)
+                             .count());
                 return build;
             });
             if (queued) {
@@ -1290,12 +1414,21 @@ compile_now:
     if (is_new) {
         const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(sel.graphics_key);
         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
-        CompileTimer timer;
+        CompileTimer timer{pipeline_hash, 'g'};
 
         GraphicsPipeline::SerializationSupport sdata{};
+        // tlg: TLG_GFX_DEFERRED_BIND builds the pipeline on the compiler threads when the driver's
+        // cache misses it; the layouts and the create-info stay valid for the build.
+        const GraphicsBuilder builder{compiler.get(), worker_pipeline_caches};
+        const bool async = compiler && !EmulatorSettings.IsShaderCollect();
         it.value() = std::make_unique<GraphicsPipeline>(
             instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
-            sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
+            sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false,
+            async ? &builder : nullptr);
+        // tlg: which compile a stutter belongs to (TLG_GPU_LOG=info/debug): pipeline hash, the
+        // stage programs it was built from and the time.
+        LOG_INFO(Render_Vulkan, "tlg: compiled graphics pipeline {:#x} ({}) in {:.1f} ms",
+                 pipeline_hash, DescribeStages(sel.infos), timer.Ms());
 
         RegisterPipelineData(sel.graphics_key, pipeline_hash, sdata);
         ++num_new_pipelines;
@@ -1321,6 +1454,12 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     if (!RefreshComputeKey()) {
         return nullptr;
     }
+    if (TlgPerf::Enabled() && !compute_pipelines.contains(compute_key)) {
+        TlgPerf::Event e; e.kind = TlgPerf::Kind::PipelineRequest;
+        e.object = std::hash<ComputePipelineKey>{}(compute_key);
+        e.a = 'c'; e.b = 0; // Per-request cache provenance is unknown; ShaderLoad records actual loads.
+        TlgPerf::Emit(e);
+    }
     TlgRegion::NotePipeline('c', std::hash<ComputePipelineKey>{}(compute_key),
                             compute_pipelines.contains(compute_key));
     const auto [it, is_new] = compute_pipelines.try_emplace(compute_key);
@@ -1330,7 +1469,7 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     if (is_new) {
         const auto pipeline_hash = std::hash<ComputePipelineKey>{}(compute_key);
         LOG_INFO(Render_Vulkan, "Compiling compute pipeline {:#x}", pipeline_hash);
-        CompileTimer timer;
+        CompileTimer timer{pipeline_hash, 'c'};
 
         ComputePipeline::SerializationSupport sdata{};
         // tlg: built on the compiler threads when the driver hasn't cached it (the dispatch
@@ -1709,8 +1848,12 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
                                               Shader::Backend::Bindings& binding) {
     LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x} {}", info.hw_stage, info.pgm_hash,
              perm_idx != 0 ? "(permutation)" : "");
+    if (TlgPerf::Enabled()) {
+        TlgPerf::Event e; e.kind = TlgPerf::Kind::ShaderTranslate;
+        e.object = info.pgm_hash; e.generation = perm_idx; TlgPerf::Emit(e);
+    }
     DumpShader(code, info.pgm_hash, info.hw_stage, perm_idx, "bin");
-    CompileTimer timer;
+    CompileTimer timer{info.pgm_hash, 's'};
 
     const auto ir_program = Shader::TranslateProgram(code, pools, info, runtime_info, profile);
     auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime_info, ir_program, binding);
@@ -1736,6 +1879,10 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
         DebugState.CollectShader(name, info.sw_stage, module, spv, code,
                                  patch ? *patch : std::span<const u32>{}, is_patched);
     }
+    // tlg: which compile a stutter belongs to (TLG_GPU_LOG=info/debug, TLG_VERBOSE_LOG=1): these
+    // run during the game, the warm-up loads its shaders from the store and never comes here.
+    LOG_INFO(Render_Vulkan, "tlg: compiled {} shader {:#x} perm {} in {:.1f} ms", info.hw_stage,
+             info.pgm_hash, perm_idx, timer.Ms());
     return module;
 }
 
@@ -1866,7 +2013,12 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     };
 
     auto it_pgm = program_cache.find(params.hash); // this thread is the only writer
-    if (it_pgm == program_cache.end() && lazy_programs && LoadProgramFromCache(params.hash)) {
+    // Reuse cached SPIR-V on every startup path, retaining main's load diagnostics.
+    if (it_pgm == program_cache.end() && LoadProgramFromCache(params.hash)) {
+        if (TlgPerf::Enabled()) {
+            TlgPerf::Event e; e.kind = TlgPerf::Kind::ShaderLoad;
+            e.object = params.hash; TlgPerf::Emit(e);
+        }
         it_pgm = program_cache.find(params.hash);
     }
     const bool compile_async = AsyncCompilation() && hw_stage != HwStage::Compute &&

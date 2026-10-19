@@ -96,6 +96,36 @@ class ExportTests(Base):
 
 
 class RoundTripTests(Base):
+    def test_rx580_preset_is_opt_in_and_every_normal_preset_clears_it(self):
+        settings = dict(DEFAULTS)
+        states = {i.id: None for i in backports_table.ITEMS}
+        item = gfxlogic.item_by_id('TLG_BARRIER_MERGE')
+        self.assertEqual(item.default, '0')
+        self.assertEqual(item.tab, 'image')
+        self.assertEqual(gfxlogic.matching_preset(settings, states), gfxlogic.DEFAULT_PRESET)
+        self.assertEqual(backports_table.environment(states), {})
+
+        gfxlogic.apply_targets(settings, states, gfxlogic.preset_targets('rx580'))
+        self.assertEqual(states['TLG_BARRIER_MERGE'], '1')
+        self.assertEqual(backports_table.environment(states)['ISS_BARRIER_MERGE'], '1')
+        self.assertNotIn('ISS_BARRIER_MERGE', backports_table.environment(states, {'ISS_BARRIER_MERGE': '0'}))
+        self.assertNotIn('ISS_BARRIER_MERGE', backports_table.environment(states, {'TLG_BARRIER_MERGE': '0'}))
+        self.assertEqual(gfxlogic.matching_preset(settings, states), 'rx580')
+
+        exported = preset_share.export_preset(settings, states, 'RX580')
+        parsed, problems = preset_share.parse_preset(exported)
+        self.assertEqual(problems, [])
+        self.assertEqual(parsed['items']['TLG_BARRIER_MERGE'], '1')
+        new_settings, new_states = dict(DEFAULTS), {i.id: None for i in backports_table.ITEMS}
+        preset_share.apply_preset(parsed, new_settings, new_states)
+        self.assertEqual(new_states['TLG_BARRIER_MERGE'], '1')
+        self.assertEqual(backports_table.environment(new_states)['ISS_BARRIER_MERGE'], '1')
+
+        for preset_id in ('current', 'amd', 'rec1', 'seco', 'balanced', 'performance', 'quality', 'ps4'):
+            gfxlogic.apply_targets(settings, states, gfxlogic.preset_targets(preset_id))
+            self.assertIsNone(states['TLG_BARRIER_MERGE'], preset_id)
+            self.assertNotIn('ISS_BARRIER_MERGE', backports_table.environment(states), preset_id)
+
     def test_export_then_read_gives_the_same_values(self):
         settings, states = custom_settings(), custom_states()
         path = preset_share.write_preset(preset_share.export_preset(settings, states, 'rt'), self.dir / 'rt')

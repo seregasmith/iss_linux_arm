@@ -75,7 +75,7 @@ inline constexpr std::array<int, 3> FramesQueued = {1, 2, 0};
 inline int ParseFramesQueued(int value) {
     return IndexOf(FramesQueued, value, -1) >= 0 ? value : 1;
 }
-/// RCAS strength in percent; invalid values fall back to 75.
+/// RCAS strength in percent; invalid values fall back to 60.
 inline int ParseRcasStrength(int value) {
     return value >= 0 && value <= 100 ? value : 60;
 }

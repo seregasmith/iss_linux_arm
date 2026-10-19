@@ -220,33 +220,36 @@ void DataBase::Close() {
 template <typename T>
 bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector<T>&& v) {
     {
-        auto request = std::packaged_task<void()>{[=]() {
-            auto path{path_};
-            path.replace_extension(GetBlobFileExtension(type));
-            if (EmulatorSettings.IsPipelineCacheArchived()) {
-                ASSERT_MSG(!ar_is_read_only,
-                           "The archive is read-only. Did you forget to call `FinishPreload`?");
-                if (!mz_zip_writer_add_mem(&zip_ar, path.string().c_str(), v.data(),
-                                           v.size() * sizeof(T), MZ_BEST_COMPRESSION)) {
-                    LOG_ERROR(Render, "Failed to add {} to the archive", path.string().c_str());
-                }
-            } else {
-                // tlg: write beside and rename into place, so a game that ends during the
-                // write (the queue is not drained at exit) never leaves a truncated blob that
-                // the next start would load.
-                using namespace Common::FS;
-                auto temp{path};
-                temp += ".tmp";
-                {
-                    const auto file = IOFile{temp, FileAccessMode::Create};
-                    if (!file.IsOpen() || file.Write(v) != v.size()) {
-                        return;
+        // tlg: the blob and its path move into the job: capturing them by value copied the whole
+        // blob on the caller, once per pipeline the game builds (tens per second while it plays).
+        auto request = std::packaged_task<void()>{
+            [type, v = std::move(v), path_ = std::move(path_)]() mutable {
+                auto path{std::move(path_)};
+                path.replace_extension(GetBlobFileExtension(type));
+                if (EmulatorSettings.IsPipelineCacheArchived()) {
+                    ASSERT_MSG(!ar_is_read_only,
+                               "The archive is read-only. Did you forget to call `FinishPreload`?");
+                    if (!mz_zip_writer_add_mem(&zip_ar, path.string().c_str(), v.data(),
+                                               v.size() * sizeof(T), MZ_BEST_COMPRESSION)) {
+                        LOG_ERROR(Render, "Failed to add {} to the archive", path.string().c_str());
                     }
+                } else {
+                    // tlg: write beside and rename into place, so a game that ends during the
+                    // write (the queue is not drained at exit) never leaves a truncated blob that
+                    // the next start would load.
+                    using namespace Common::FS;
+                    auto temp{path};
+                    temp += ".tmp";
+                    {
+                        const auto file = IOFile{temp, FileAccessMode::Create};
+                        if (!file.IsOpen() || file.Write(v) != v.size()) {
+                            return;
+                        }
+                    }
+                    std::error_code error;
+                    std::filesystem::rename(temp, path, error);
                 }
-                std::error_code error;
-                std::filesystem::rename(temp, path, error);
-            }
-        }};
+            }};
         std::scoped_lock lock{m_request};
         req_queue.emplace(std::move(request));
     }

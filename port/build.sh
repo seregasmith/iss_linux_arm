@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
+# Players' names work too (the README says ISS_LTO=OFF): ISS_LTO/ISS_PGO set TLG_LTO/TLG_PGO.
+[[ -n ${ISS_LTO:-} && -z ${TLG_LTO:-} ]] && export TLG_LTO=$ISS_LTO
+[[ -n ${ISS_PGO:-} && -z ${TLG_PGO:-} ]] && export TLG_PGO=$ISS_PGO
 # The commit the probe logs on its first line (CI: GITHUB_SHA; local: git, plus "+dirty").
 if [[ -z ${TLG_BUILD_COMMIT:-} ]]; then
     TLG_BUILD_COMMIT=${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}
@@ -136,7 +139,7 @@ if [[ ${1:-} == --test ]]; then
     out/mouse-pad-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${cpu[@]}" "${libraries[@]}" -o out/runtime-test
     out/runtime-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Isrc tests/test_file_mods.c -o out/file-mods-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${cpu[@]}" "${libraries[@]}" -o out/sema-test
     out/sema-test

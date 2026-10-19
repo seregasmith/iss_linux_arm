@@ -155,6 +155,18 @@ _ROWS = (
     ('image', '1D_NO_MUTABLE', 'bool', '0', ('1D images without mutable format', 'Imagens 1D sem formato mutável'),
      ('AMD workaround test: creates 1D images without the mutable-format flag.',
       'Teste de contorno para AMD: cria imagens 1D sem o formato mutável.'), {'risky': True}),
+    ('image', 'EXPLICIT_RANGE', 'bool', '1', ('Explicit image barrier ranges', 'Intervalos explícitos de barreiras de imagem'),
+     ('Uses the image mip and layer counts in full-image barriers. Disable to compare the original Vulkan remaining-range form.',
+      'Usa a quantidade de mips e camadas da imagem nas barreiras completas. Desligue para comparar com a forma original do Vulkan.'), {}),
+    ('image', 'BARRIER_SPLIT', 'int', '0', ('Split full-image barriers', 'Dividir barreiras de imagem completa'),
+     ('Diagnostic comparison: 0 = whole image, 1 = per mip, 2 = per mip and layer. Requires explicit ranges; disable RX 580 compatibility to inspect the split barriers.',
+      'Comparação de diagnóstico: 0 = imagem toda, 1 = por mip, 2 = por mip e camada. Exige intervalos explícitos; desligue a compatibilidade RX 580 para inspecionar as barreiras divididas.'),
+     {'lo': 0, 'hi': 2, 'risky': True}),
+    ('image', 'BARRIER_MERGE', 'bool', '0', ('RX580 compatibility', 'Compatibilidade RX580'),
+     ('Experimental workaround tested by two RX 580 users in an earlier build. This version still needs '
+      'validation. Off by default; restart the game after changing it.',
+      'Contorno experimental testado por dois usuários de RX 580 em um build anterior. Esta versão ainda precisa '
+      'de validação. Desligado por padrão; reinicie o jogo após mudar.'), {'risky': True}),
     ('diag', 'PERF_DIAG', 'bool', '0', ('Image creation report', 'Relatório de criação de imagens'),
      ('Every 5 s the log lists the images created most often and the partial-height views used, to see whether a game remakes the same image every frame.',
       'A cada 5 s o log lista as imagens criadas com mais frequência e as vistas de altura parcial usadas, para ver se o jogo refaz a mesma imagem a cada quadro.'), {}),

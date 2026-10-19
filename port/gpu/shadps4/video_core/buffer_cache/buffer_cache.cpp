@@ -1,3 +1,4 @@
+#include "tlg_perf_trace.h"
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -170,11 +171,16 @@ void BufferCache::ExtendWriteFault(VAddr device_addr) {
 namespace {
 struct ReadbackStats {
     std::atomic<u64> count{0}, queue_ns{0}, flush_ns{0}, finish_ns{0}, bytes{0};
-    /// Deferred readbacks: recorded, joined, applied by guest threads, stale (fell back to the
-    /// download), guest time from the request to the copy applied, bytes copied.
-    std::atomic<u64> deferred{0}, joined{0}, applied{0}, stale{0}, deferred_ns{0}, deferred_bytes{0};
+    /// Deferred readbacks: recorded, joined, joined without the GPU command thread (applied on
+    /// the faulting thread, TLG_READBACK_LOCAL_JOIN), applied by guest threads, stale (fell back
+    /// to the download), guest time from the request to the copy applied, bytes copied.
+    std::atomic<u64> deferred{0}, joined{0}, local_joined{0}, applied{0}, stale{0}, deferred_ns{0},
+        deferred_bytes{0};
     /// Eager copies: pages copied, used by a fault, gone stale unread, skipped for backoff.
     std::atomic<u64> eager_copied{0}, eager_used{0}, eager_stale{0}, eager_skipped{0};
+    /// Waits for a readback copy tick (WaitReadbackTick): the scheduler's own waits do not
+    /// count them.
+    std::atomic<u64> guest_waits{0}, guest_wait_ns{0};
     std::atomic<s64> window_start{0};
 };
 ReadbackStats& Readbacks() {
@@ -204,11 +210,12 @@ void ReportReadbacks() {
     std::printf("Readback stats (5 s): %llu downloads, queue %.1f ms, flush %.1f ms (GPU finish %.1f ms), %.1f MB\n",
                 static_cast<unsigned long long>(n), r.queue_ns.exchange(0) / 1e6, r.flush_ns.exchange(0) / 1e6,
                 r.finish_ns.exchange(0) / 1e6, r.bytes.exchange(0) / 1048576.0);
-    std::printf("  deferred: %llu recorded, %llu joined, %llu applied, %llu stale (downloaded), "
-                "guest wait %.1f ms, %.1f MB; eager: %llu pages copied, %llu used, %llu stale unread, "
-                "%llu skipped (backoff)\n",
+    std::printf("  deferred: %llu recorded, %llu joined (%llu without the GPU thread), %llu applied, "
+                "%llu stale (downloaded), guest wait %.1f ms, %.1f MB; eager: %llu pages copied, "
+                "%llu used, %llu stale unread, %llu skipped (backoff)\n",
                 static_cast<unsigned long long>(r.deferred.exchange(0)),
                 static_cast<unsigned long long>(r.joined.exchange(0)),
+                static_cast<unsigned long long>(r.local_joined.exchange(0)),
                 static_cast<unsigned long long>(r.applied.exchange(0)),
                 static_cast<unsigned long long>(r.stale.exchange(0)), r.deferred_ns.exchange(0) / 1e6,
                 r.deferred_bytes.exchange(0) / 1048576.0,
@@ -216,9 +223,28 @@ void ReportReadbacks() {
                 static_cast<unsigned long long>(r.eager_used.exchange(0)),
                 static_cast<unsigned long long>(r.eager_stale.exchange(0)),
                 static_cast<unsigned long long>(r.eager_skipped.exchange(0)));
+    std::printf("  waits for a readback copy: %llu, %.1f ms\n",
+                static_cast<unsigned long long>(r.guest_waits.exchange(0)),
+                r.guest_wait_ns.exchange(0) / 1e6);
     std::fflush(stdout);
 }
 } // namespace
+
+// tlg: the waits for a readback copy tick (eager and deferred copies) go straight to the work
+// semaphore, so the scheduler's own tick_wait_ns misses them; they are counted here instead.
+// Scheduler::Wait also submits when the tick has not been (the copies are always submitted when
+// they are recorded, so this is the bounded fallback that keeps the guest from waiting forever).
+void BufferCache::WaitReadbackTick(u64 tick) {
+    const s64 started = ReadbackStatsEnabled() ? NowNs() : 0;
+    // tlg: the semaphore, not scheduler.Wait: this runs on guest threads (faults, write merge),
+    // which must never submit (the tick was flushed when the copy was recorded).
+    scheduler.GetWorkSemaphore()->Wait(tick);
+    if (started) {
+        auto& r = Readbacks();
+        r.guest_waits.fetch_add(1);
+        r.guest_wait_ns.fetch_add(NowNs() - started);
+    }
+}
 
 std::tuple<const Buffer*, VAddr, VAddr> BufferCache::GetReadbackWindow(VAddr device_addr,
                                                                        u64 size) {
@@ -245,8 +271,20 @@ std::tuple<const Buffer*, VAddr, VAddr> BufferCache::GetReadbackWindow(VAddr dev
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool assume_locks) {
+    TlgPerf::Span trace_read{TlgPerf::Kind::WaitBegin, TlgPerf::Kind::WaitEnd,
+                            TlgPerf::Label("buffer_readback"), is_write ? 1ULL : 0ULL};
+    const auto trace_operation = trace_read.Id();
+    const auto trace_origin = TlgPerf::Enabled() ? TlgPerf::Hash(device_addr) : 0;
+    if (trace_operation) {
+        TlgPerf::Event e; e.kind=TlgPerf::Kind::ResourceRead; e.operation=trace_operation;
+        e.object=trace_origin; e.a=size; e.generation=is_write; TlgPerf::Emit(e);
+    }
     const s64 queued_at = ReadbackStatsEnabled() ? NowNs() : 0;
-    const auto flush_request = [this, device_addr, size, is_write, queued_at] {
+    const auto flush_request = [this, device_addr, size, is_write, queued_at,trace_operation,trace_origin] {
+        if (trace_operation) {
+            TlgPerf::Event e; e.kind=TlgPerf::Kind::ReadbackApply;e.operation=trace_operation;
+            e.object=trace_origin;e.a=size;e.generation=is_write;TlgPerf::Emit(e);
+        }
         const s64 started_at = queued_at ? NowNs() : 0;
         const auto [arena, window_start, window_end] = GetReadbackWindow(device_addr, size);
         DownloadMemory(arena, window_start, window_end - window_start);
@@ -268,13 +306,26 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
         // tlg: the GPU command thread only records the copy and goes on with the game's
         // commands; this thread waits for the copy, as it would for the GPU on a console.
         std::shared_ptr<DeferredReadback> readback;
-        liverpool->SendCommand<true, true>([&] {
-            readback = StartDeferredReadback(device_addr, size);
-            if (!readback && is_write) {
-                // Nothing to copy back, as when DownloadMemory finds nothing.
-                memory_tracker->MarkRegionAsCpuModified(device_addr, size);
+        if (LocalReadbackJoin()) {
+            // Join an already-recorded copy without sending another GPU command.
+            readback = PendingDeferredReadback(device_addr, size);
+            if (readback && queued_at) {
+                Readbacks().local_joined.fetch_add(1);
             }
-        });
+        }
+        if (!readback) {
+            liverpool->SendCommand<true, true>([&] {
+                if (trace_operation) {
+                    TlgPerf::Event e; e.kind=TlgPerf::Kind::ReadbackApply;e.operation=trace_operation;
+                    e.object=trace_origin;e.a=size;e.generation=is_write;TlgPerf::Emit(e);
+                }
+                readback = StartDeferredReadback(device_addr, size);
+                if (!readback && is_write) {
+                    // Nothing to copy back, as when DownloadMemory finds nothing.
+                    memory_tracker->MarkRegionAsCpuModified(device_addr, size);
+                }
+            });
+        }
         if (readback && !FinishDeferredReadback(*readback, true)) {
             // The GPU (or a CPU write without a fault) changed the memory after the copy was
             // recorded: download it the old way, which first recovers the stale copy's ranges.
@@ -977,7 +1028,7 @@ bool BufferCache::TryEagerRead(VAddr addr, u64 size) {
         offset = it->second.offset;
         tick = it->second.tick;
     }
-    scheduler.GetWorkSemaphore()->Wait(tick);
+    WaitReadbackTick(tick);
     std::scoped_lock lock{eager_mutex};
     const auto it = eager_pages.find(page_addr);
     if (it == eager_pages.end() || !it->second.valid || it->second.tick != tick) {
@@ -1011,6 +1062,19 @@ bool BufferCache::DeferredReadbackEnabled() {
     static const bool enabled = [] {
         const char* e = std::getenv("TLG_DEFERRED_READBACK");
         return e && *e == '1' && EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise;
+    }();
+    return enabled;
+}
+
+bool BufferCache::LocalReadbackJoin() {
+    static const bool enabled = [] {
+        const char* env = std::getenv("TLG_READBACK_LOCAL_JOIN");
+        const bool on = env && env[0] == '1';
+        if (on) {
+            // In last_run.log whatever the GPU log level, so a tester's log shows the mode.
+            std::printf("GPU: local readback join on (TLG_READBACK_LOCAL_JOIN=1)\n");
+        }
+        return on;
     }();
     return enabled;
 }
@@ -1072,9 +1136,28 @@ std::shared_ptr<BufferCache::DeferredReadback> BufferCache::StartDeferredReadbac
     return readback;
 }
 
+std::shared_ptr<BufferCache::DeferredReadback> BufferCache::PendingDeferredReadback(
+    VAddr device_addr, u64 size) {
+    if (!deferred_count.load(std::memory_order_acquire)) {
+        return nullptr;
+    }
+    const auto window = GetReadbackWindow(device_addr, size);
+    const VAddr window_start = std::get<1>(window);
+    const VAddr window_end = std::get<2>(window);
+    std::scoped_lock lock{deferred_mutex};
+    for (const auto& readback : deferred_readbacks) {
+        // The same test StartDeferredReadback joins with on the GPU command thread.
+        if (!readback->Done() && !readback->stale && readback->start <= window_start &&
+            window_end <= readback->end) {
+            return readback;
+        }
+    }
+    return nullptr;
+}
+
 bool BufferCache::FinishDeferredReadback(DeferredReadback& readback, bool wait) {
     if (wait) {
-        scheduler.GetWorkSemaphore()->Wait(readback.tick);
+        WaitReadbackTick(readback.tick);
     }
     std::scoped_lock lock{readback.mutex};
     if (readback.applied.load(std::memory_order_acquire)) {
@@ -1208,16 +1291,10 @@ bool BufferCache::CpuWriteMerge(VAddr dst, const void* src, int fill, u64 size) 
         if (!memory->TryWriteBacking(reinterpret_cast<void*>(dst), src, size)) {
             return false;
         }
-    } else {
-        std::array<u8, 4096> chunk;
-        chunk.fill(static_cast<u8>(fill));
-        for (u64 done = 0; done < size;) {
-            const u64 n = std::min<u64>(chunk.size(), size - done);
-            if (!memory->TryWriteBacking(reinterpret_cast<void*>(dst + done), chunk.data(), n)) {
-                return done == 0 ? false : (std::memset(reinterpret_cast<void*>(dst + done), fill, size - done), true);
-            }
-            done += n;
-        }
+    } else if (!memory->FillBacking(reinterpret_cast<void*>(dst), fill, size)) {
+        // Part of the range has no backing: the guest writes it itself. The runs written through
+        // the backing hold the same fill byte, so a partial fill is not lost.
+        return false;
     }
     std::scoped_lock lock{merge_mutex};
     VAddr start = dst, end = dst + size;
@@ -1558,10 +1635,14 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     };
 
     info.AddWait(signal_sema, signal_tick);
+    // tlg: the submit callback runs inside SubmitExecution, which with TLG_SPLIT_SUBMIT_LOCK=1
+    // holds the queue lock only for its own submit.
+    auto queue_lock = Vulkan::Scheduler::LockQueueInSubmit();
     const auto bind_start = std::chrono::steady_clock::now();
     auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
     const auto elapsed = std::chrono::steady_clock::now() - bind_start;
+    queue_lock = std::unique_lock<std::mutex>{};
     // Sparse binds are reported to get slower the more memory is bound on NVIDIA drivers. Log the
     // slow ones (the first few, then every 32nd) with how much is resident, to confirm the cost.
     if (elapsed >= std::chrono::milliseconds{2}) {

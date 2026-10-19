@@ -140,6 +140,14 @@ public:
     [[nodiscard]] bool DrawPipeIdle() const {
         return !draw_pipe || draw_pipe->Idle();
     }
+    /// tlg: the draw recording thread's CPU clock id (Linux) and thread id (Windows), for the
+    /// frame statistics; -1/0 when the pipe is off or the thread has not started.
+    [[nodiscard]] int DrawPipeCpuClock() const {
+        return draw_pipe ? draw_pipe->cpu_clock.load(std::memory_order_relaxed) : -1;
+    }
+    [[nodiscard]] u32 DrawPipeCpuThreadId() const {
+        return draw_pipe ? draw_pipe->cpu_tid.load(std::memory_order_relaxed) : 0;
+    }
     /// Stage A, end of a submission: its prepared draws stay alive until the recording thread
     /// has recorded them (instead of a drain).
     void RetireSubmission();
@@ -157,6 +165,10 @@ public:
     /// The GPU command thread or the draw recording thread (fault handling runs inline there).
     bool IsGpuSideThread() const;
     bool IsGpuSideThreadId(u32 tid) const;
+    /// tlg: TLG_FOREIGN_SERIALIZE=1 sends work a non-GPU-side thread runs on state the draw
+    /// recording thread owns (today: the image part of UnmapMemory) to the GPU command thread,
+    /// in order with the draws handed over before it. Off by default.
+    void RunForeign(std::function<void()> work);
     /// A guest write hit a protected page.
     bool OnWriteFault(VAddr addr, bool assume_locks);
     bool ReadMemory(VAddr addr, u64 size, bool assume_locks = false);
@@ -297,8 +309,6 @@ private:
                       Shader::Backend::Bindings& binding, u32& write_index, bool& barrier,
                       bool on_helper = false);
     bool BindResources(const Pipeline* pipeline);
-    void BindSamplers(const Shader::Info& stage, const PreparedStage* prepared,
-                      Shader::Backend::Bindings& binding, u32& write_index);
     /// tlg: a stage's resolved textures remembered by its prepared T# hashes
     /// (TextureSetMemo): a hit only redoes the per-draw effects (binding flags, transitions).
     struct TextureSetEntry {
@@ -317,6 +327,15 @@ private:
         static constexpr u32 MaxImages = 16; ///< larger sets are not memoized
         std::array<u64, MaxImages> hashes{};
         std::array<TextureSetEntry, MaxImages> entries{};
+        /// tlg (SamplerSetMemo): the stage's samplers, resolved once per set. `sampler_key` is
+        /// SamplerSetKey's hash of GetSampler's inputs; `sampler_generation` is the sampler
+        /// cache's generation then and `sampler_lru_ids` their LRU entries, so a hit can mark
+        /// them used (TouchSamplers) without the collector evicting samplers in use.
+        std::array<vk::Sampler, Shader::NUM_SAMPLERS> samplers{};
+        std::array<u64, Shader::NUM_SAMPLERS> sampler_lru_ids{};
+        u64 sampler_key = 0;
+        u64 sampler_generation = ~0ull;
+        u32 sampler_count = 0;
     };
     std::array<TextureSet, 32768> texture_sets{};
     u64 texture_set_hits = 0, texture_set_misses = 0;
@@ -324,6 +343,14 @@ private:
     /// Returns true when the stage's images were bound from the memo.
     bool BindTexturesFromSet(const Shader::Info& stage, const PreparedStage* prepared,
                              u32 first_image_idx, bool& barrier, TextureSet*& slot);
+    /// `set_slot` is the texture set this stage's textures belong to (BindTexturesFromSet):
+    /// SamplerSetMemo resolves its samplers once and a hit reuses them.
+    void BindSamplers(const Shader::Info& stage, const PreparedStage* prepared,
+                      Shader::Backend::Bindings& binding, u32& write_index,
+                      TextureSet* set_slot);
+    /// tlg (SamplerSetMemo): hash of everything GetSampler depends on for this stage: its S#s,
+    /// the border color base, the per-sampler depth flags and this draw's sampler LOD bias.
+    u64 SamplerSetKey(const Shader::Info& stage, const PreparedStage* prepared) const;
     /// The prepared sharps of `stage` in the current prepared draw, if they fit it.
     const PreparedStage* FindPreparedStage(const Shader::Info& stage) const;
     /// Whether the helper may bind textures for this pipeline at all (fixed descriptor layout,
@@ -406,6 +433,16 @@ private:
 
     u32 set_write_index{};
     Pipeline::DescriptorWrites set_writes;
+    /// tlg (SetWritePool): room for `count` descriptor writes. The vector keeps its elements
+    /// between draws, so growing it (which value-initialises them) happens once per high-water
+    /// mark instead of per draw; with TLG_SET_WRITE_POOL=0 BindResources clears it each draw.
+    void EnsureSetWrites(u32 count) {
+        if (set_writes.size() < count) {
+            set_writes.resize(count);
+        }
+    }
+    /// tlg: whether the per-draw descriptor writes keep their storage (SetWritePool).
+    static bool SetWritePool();
     Shader::PushData push_data;
 
     // tlg: bindings point at their description instead of copying it (a hot spot): into

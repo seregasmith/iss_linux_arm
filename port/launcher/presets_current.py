@@ -36,6 +36,7 @@ CURRENT = {
         'BP06': '1',        # the default; listed so that leaving the AMD preset turns it back on
         'BP07': '1',
         'BP08': '1',
+        'TLG_BARRIER_MERGE': '0',
     },
     # in the export for reference, never applied
     'not_applied': {

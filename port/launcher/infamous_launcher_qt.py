@@ -18,6 +18,9 @@ import infamous_run as tlg_run  # noqa: E402
 def main():
     multiprocessing.freeze_support()   # packaged: the shader list generator starts worker processes (re-runs this exe)
     args = sys.argv[1:]
+    if args[:1] in (['--apply-update'], ['--rollback-update']) and len(args) == 3:
+        import update_install
+        sys.exit(update_install.helper(args[1], int(args[2]), rollback=args[0] == '--rollback-update'))
     # Same packaged roles as the Tk launcher: preparation scripts and a window-less --play.
     if args[:1] == ['--script'] and len(args) > 1:
         sys.exit(tlg_run.run_script(args[1:]))
@@ -40,7 +43,42 @@ def main():
     except ImportError as error:
         sys.exit(f'PySide6 is missing ({error}). Install it with: pip install PySide6-Essentials\n'
                  f'PySide6 não encontrado. Instale com: pip install PySide6-Essentials')
-    code = App().run()
+    launch_lock = None
+    if tlg_run.FROZEN and os.name == 'nt':
+        import update_install
+        try:
+            launch_lock = update_install.install_lock(tlg_run.PORT_DIR, '.iss-launcher.lock')
+            launch_lock.__enter__()
+            pending = update_install.pending(tlg_run.PORT_DIR)
+            if pending and pending[1]['status'] in ('applying', 'recovering'):
+                launch_lock.__exit__(None, None, None)
+                launch_lock = None
+                update_install.start_helper(pending[0], rollback=True)
+                return 0
+        except (update_install.InstallError, OSError) as error:
+            import ctypes
+            url = 'https://github.com/HayatoG/iss_pc/releases/latest'  # same value as qt/releases.py RELEASES_URL
+            if getattr(error, 'kind', '') == 'busy':   # another launcher window, or an update, holds the lock
+                text = ('Outra janela do launcher ou uma atualização está em andamento. Aguarde e tente de novo.\n\n'
+                        'Another launcher window or an update is in progress. Wait and try again.')
+            else:
+                text = ('Uma atualização anterior foi interrompida e não pode ser concluída automaticamente. '
+                        'Mantenha a pasta de instalação como está, não apague a pasta user/ nem os saves, '
+                        'e reinstale o pacote da release nesta mesma pasta:\n' + url + '\n\n'
+                        'A previous update was interrupted and cannot be completed automatically. '
+                        'Keep the install folder as it is, do not delete the user/ folder or your saves, '
+                        'and reinstall the release package into this same folder from the release page:\n' + url)
+            ctypes.windll.user32.MessageBoxW(None, f'{text}\n\n({error})', 'inFAMOUS — Launcher / Atualização', 0x10)
+            return 1
+    try:
+        app = App()
+        if launch_lock:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: update_install.confirm(tlg_run.PORT_DIR))
+        code = app.run()
+    finally:
+        if launch_lock:
+            launch_lock.__exit__(None, None, None)
     # Settings are already saved and the game runs on its own: skip the interpreter teardown, where
     # PySide6/QML destructors and leftover threads could keep a closed launcher alive (Windows).
     for stream in (sys.stdout, sys.stderr):   # None in the windowed executable
