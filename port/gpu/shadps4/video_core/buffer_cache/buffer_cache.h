@@ -5,6 +5,7 @@
 
 #include "tlg_copy.h"
 
+#include <array>
 #include <atomic>
 #include <deque>
 #include <map>
@@ -190,6 +191,16 @@ public:
     /// see a frame-old version. False: the caller reads back the precise way. Guest threads.
     bool TryStaleRead(VAddr addr, u64 size);
 
+    /// tlg: TLG_TWIN_WRITES=1 (with stale buffer reads): a CPU write fault on GPU modified memory
+    /// does not wait either. The page is kept as it is (its twin) and made writable while it stays
+    /// GPU modified. The bytes the CPU changed are found by comparing the page with its twin
+    /// (HarvestTwins) and sent to the GPU before it runs the game's next submission or copies the
+    /// memory back; GPU data copied back is merged in word by word around them (WriteGpuData).
+    /// When the GPU data is back for good the twin goes (SettleTwins). False: the caller takes
+    /// the usual path (no GPU data on the page, no room for more twins). Guest threads.
+    bool TryTwinWrite(VAddr addr, u64 size);
+    static bool TwinWritesEnabled();
+
 private:
     /// Uploads the merged guest writes inside [device_addr, device_addr + size) of `arena`.
     void FlushMergedWrites(const Buffer* arena, VAddr device_addr, u64 size);
@@ -244,6 +255,8 @@ private:
         /// the copy must not be published over it; and a publish is scheduled (keeps the staging).
         std::atomic<bool> cpu_written{};
         std::atomic<bool> publish_pending{};
+        /// tlg (twin writes): its place among the harvests (twin_sequence), taken when recorded.
+        u64 sequence{};
         /// Won't be applied; its ranges are back in gpu_modified_ranges.
         std::atomic<bool> recovered{};
         std::mutex mutex;
@@ -294,6 +307,32 @@ private:
     /// The copies in flight overlapping a range the CPU is about to write must not be
     /// published over it. Any thread.
     void MarkDeferredCpuWritten(VAddr addr, u64 size);
+
+    /// tlg (twin writes, see TryTwinWrite).
+    struct TwinPage {
+        std::array<u64, 512> words{}; ///< the page as the CPU and the GPU last agreed on it
+        std::array<u32, 512> seq{};   ///< per word: the harvest that last sent CPU bytes of it
+        u8* backing = nullptr;        ///< the page through the backing view
+    };
+    /// Finds the CPU's changes in the twins of pages in [lo, hi) and queues them as merged
+    /// writes. GPU-side threads.
+    void HarvestTwins(VAddr lo, VAddr hi);
+    /// Writes GPU data copied at `sequence` into guest memory; twin pages get it merged in.
+    void WriteGpuData(VAddr dst, const u8* src, u64 size, u64 sequence);
+    /// Merges GPU data into one twin page, word by word with atomics: bytes the CPU changed
+    /// since the twin agreed with the GPU stay, and words whose CPU bytes were sent after the copy
+    /// was recorded are left alone. twin_mutex held.
+    static void MergeIntoTwin(TwinPage& twin, u64 offset, const u8* src, u64 size, u64 sequence);
+    /// Drops the twins of pages in [lo, hi) that are no longer GPU modified; pages the CPU
+    /// changed are marked CPU modified (uploaded whole). Any thread.
+    void SettleTwins(VAddr lo, VAddr hi);
+    /// Adds [start, end) to merged_writes. merge_mutex held.
+    void AddMergedRangeLocked(VAddr start, VAddr end);
+    std::mutex twin_mutex;
+    std::map<VAddr, std::unique_ptr<TwinPage>> twins; ///< by page address
+    std::atomic<u32> twin_count{0};
+    std::atomic<u64> twin_sequence{1}; ///< stream order of harvests and copies back
+    std::atomic<u64> twin_epoch{0};    ///< guest submissions seen by the last full harvest
     std::mutex deferred_mutex; ///< guards the list (guest threads read it)
     std::vector<std::shared_ptr<DeferredReadback>> deferred_readbacks;
     std::atomic<u32> deferred_count{0};

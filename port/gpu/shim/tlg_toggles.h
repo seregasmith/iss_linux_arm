@@ -104,6 +104,9 @@ inline bool Disabled(std::uint64_t bit) {
 } // namespace TlgToggle
 
 namespace TlgStats {
+/// Command buffers the game submitted (Liverpool::SubmitGfx/SubmitAsc): the twin writes send the
+/// CPU's changes to the GPU before it runs the next submission's work (BufferCache::HarvestTwins).
+inline std::atomic<std::uint64_t> guest_submissions{0};
 /// Guest writes caught by page protection, and pages currently left unprotected as hot.
 inline std::atomic<std::uint64_t> tracker_faults{0};
 inline std::atomic<std::int64_t> hot_pages{0};

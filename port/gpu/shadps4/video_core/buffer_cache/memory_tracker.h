@@ -88,6 +88,18 @@ public:
         return allowed;
     }
 
+    /// tlg: see RegionManager::AllowTwinWrite (TLG_TWIN_WRITES); snapshot() runs under the
+    /// region lock of the page.
+    template <typename Snapshot>
+    bool AllowTwinWrite(VAddr addr, u64 query_size, Snapshot&& snapshot) {
+        bool allowed = false;
+        IteratePages<false>(addr, query_size, [&](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            allowed |= manager->AllowTwinWrite(manager->GetCpuAddr() + offset, size, snapshot);
+        });
+        return allowed;
+    }
+
     /// Unmark region as modified from the host GPU
     void UnmarkRegionAsGpuModified(VAddr dirty_cpu_addr, u64 query_size) noexcept {
         IteratePages<false>(dirty_cpu_addr, query_size,

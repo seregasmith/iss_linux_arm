@@ -25,6 +25,7 @@ int32_t* runtime_errno() { std::abort(); }
 int runtime_memory_write_backing(uintptr_t, const void*, uint64_t) { std::abort(); }
 int runtime_memory_fill_backing(uintptr_t, int, uint64_t) { std::abort(); }
 int runtime_memory_read_backing(uintptr_t, void*, uint64_t) { std::abort(); }
+void* runtime_memory_backing_page(uintptr_t) { return nullptr; }
 void runtime_report() {}
 // guest_cpu.h (the loader's runtime_cpu.c on x86-64, the guest CPU library on aarch64): no guest
 // code runs in these tests.

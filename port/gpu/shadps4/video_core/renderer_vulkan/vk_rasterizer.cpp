@@ -3856,6 +3856,17 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
 
 bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
     DrainDrawPipe();
+    // tlg: TLG_TWIN_WRITES=1: a guest write into GPU modified buffer memory goes through at once
+    // (BufferCache::TryTwinWrite); images over it are invalidated as for any CPU write.
+    if (!assume_locks && VideoCore::BufferCache::TwinWritesEnabled() && IsMapped(addr, 8)) {
+        texture_cache.ResolveReadbacks(addr, 8, false, VideoCore::ReadbackSource::CpuWrite);
+        if (!buffer_cache.TryTwinWrite(addr, 8)) {
+            buffer_cache.InvalidateMemory(addr, 8, false);
+            buffer_cache.ExtendWriteFault(addr);
+        }
+        texture_cache.InvalidateMemory(addr, 8);
+        return true;
+    }
     if (!InvalidateMemory(addr, 8, assume_locks)) {
         return false;
     }

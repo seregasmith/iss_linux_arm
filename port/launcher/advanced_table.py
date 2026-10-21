@@ -88,6 +88,14 @@ _ROWS = (
       'Experimental, precisa da precisão "Preciso": quando o jogo lê memória que a GPU escreveu, recebe na hora a '
       'versão de cerca de um quadro antes em vez de esperar a GPU. Menos travadas; alguns efeitos podem atrasar um quadro.'),
      {'risky': True}),
+    ('read', 'TWIN_WRITES', 'bool', '0', ('Game writes without waiting', 'Escritas do jogo sem esperar'),
+     ('Experimental, needs "Read GPU results a frame late": when the game writes memory the GPU also wrote, the '
+      'write goes through at once; the bytes it changed are found later and sent to the GPU. Fewer stalls; a '
+      'wrong merge would show as glitches.',
+      'Experimental, precisa de "Ler resultados da GPU com um quadro de atraso": quando o jogo escreve em memória '
+      'que a GPU também escreveu, a escrita passa na hora; os bytes alterados são achados depois e enviados à GPU. '
+      'Menos travadas; um erro de junção apareceria como defeitos.'),
+     {'risky': True}),
     ('read', 'WRITE_MERGE', 'bool', '1', ('Merge game writes', 'Juntar escritas do jogo'),
      ('Writes the game makes into memory the GPU also touches go straight through, without waiting.',
       'Escritas do jogo em memória que a GPU também mexe passam direto, sem esperar.'), {}),

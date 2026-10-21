@@ -495,7 +495,8 @@ if [ -f "$dir/log-window.txt" ]; then
         readbacks=$(grep -n '^Readback stats (5 s):' "$dir/log-window.txt" | tail -n 1 | cut -d: -f1)
         if [ -n "$readbacks" ]; then
             echo "The game's waits for GPU data (TLG_READBACK_STATS, the last 5 s):"
-            tail -n "+$readbacks" "$dir/log-window.txt" | head -n 3 | cut -c1-300 | sed 's/^/  /'
+            tail -n "+$readbacks" "$dir/log-window.txt" | awk 'NR == 1 || (/^  / && NR <= 4) { print; next } { exit }' |
+                cut -c1-300 | sed 's/^/  /'
         fi
         if [ -n "$last" ]; then
             tail -n "+$last" "$dir/log-window.txt" | grep '^Wait profile: ' | head -n 8 | cut -c1-200 > "$dir/wait-profile.tmp"
@@ -601,7 +602,7 @@ fi
            echo "    readback only work with Precise (2): their switches below have no effect" ;;
         2) echo "  GPU accuracy: Precise (readbacks 2)" ;;
     esac
-    for k in ISS_READBACKS ISS_EAGER_READBACK ISS_DEFERRED_READBACK ISS_WRITE_MERGE ISS_STALE_BUFFER_READS TLG_STALE_BUFFER_READS TLG_DOWNLOAD_WINDOW_KB ISS_UPSCALER TU_DEBUG TLG_GPU_PROFILE TLG_FAULT_PROFILE TLG_WAIT_STATS; do
+    for k in ISS_READBACKS ISS_EAGER_READBACK ISS_DEFERRED_READBACK ISS_WRITE_MERGE ISS_STALE_BUFFER_READS TLG_STALE_BUFFER_READS ISS_TWIN_WRITES TLG_TWIN_WRITES ISS_DOWNLOAD_WINDOW_KB TLG_DOWNLOAD_WINDOW_KB TLG_READBACK_LOCAL_JOIN ISS_UPSCALER TU_DEBUG TLG_GPU_PROFILE TLG_FAULT_PROFILE TLG_WAIT_STATS; do
         v=$(game_env "$k"); [ -n "$v" ] && echo "  $k=$v"
     done
     if [ -s "$dir/libraries.txt" ]; then

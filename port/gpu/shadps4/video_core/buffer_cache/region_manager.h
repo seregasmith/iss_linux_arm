@@ -44,6 +44,7 @@ public:
         writeable.Fill();
         readable.Fill();
         stale_read.Clear();
+        twin_write.Clear();
     }
     explicit RegionManager() = default;
 
@@ -103,8 +104,13 @@ public:
             NoteGpuBitsSet();
         }
         if constexpr (type == Type::GPU) {
-            // tlg: a new GPU write (or the data back): stale reads end (see AllowStaleRead).
+            // tlg: a new GPU write (or the data back): stale reads and twin writes end (see
+            // AllowStaleRead, AllowTwinWrite); the buffer cache keeps the twin itself.
             stale_read.UnsetRange(start_page, end_page);
+            if (twin_write.AnyInRange(start_page, end_page)) {
+                twin_write.UnsetRange(start_page, end_page);
+                UpdateProtection<true, false>();
+            }
         }
         if constexpr (enable) {
             bits.SetRange(start_page, end_page);
@@ -167,6 +173,31 @@ public:
         return true;
     }
 
+    /// tlg: TLG_TWIN_WRITES=1 (BufferCache::TryTwinWrite): the CPU may write (and read) the GPU
+    /// modified pages of the range without waiting for the GPU; they stay GPU modified. Before
+    /// that, snapshot() keeps the page as it is (false: no room, nothing changes). The next GPU
+    /// write protects them again. True when a page of the range was protected for writes and no
+    /// longer is. The caller holds the lock.
+    template <typename Snapshot>
+    bool AllowTwinWrite(VAddr addr, u64 size, Snapshot&& snapshot) {
+        const size_t offset = addr - cpu_addr;
+        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page =
+            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
+        if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
+            return false;
+        }
+        const RegionBits add(gpu & ~twin_write, start_page, end_page);
+        if (add.None() || !snapshot()) {
+            return false;
+        }
+        twin_write |= add;
+        stale_read |= add; // a writable page is readable too
+        UpdateProtection<false, false>();
+        UpdateProtection<false, true>();
+        return true;
+    }
+
     /**
      * Loop over each page in the given range, turn off those bits and notify the tracker if
      * needed. Call the given function on each turned off range.
@@ -205,6 +236,10 @@ public:
             } else {
                 NoteGpuBitsCleared();
                 stale_read.UnsetRange(start_page, end_page);
+                if (twin_write.AnyInRange(start_page, end_page)) {
+                    twin_write.UnsetRange(start_page, end_page);
+                    UpdateProtection<true, false>();
+                }
                 if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
                     UpdateProtection<false, true>();
                 }
@@ -267,14 +302,14 @@ private:
     void UpdateProtection() {
         RENDERER_TRACE;
         // tlg: GPU modified pages are protected for reads unless allowed stale (AllowStaleRead).
-        RegionBits mask = is_read ? ((~gpu | stale_read) ^ readable) : (cpu ^ writeable);
+        RegionBits mask = is_read ? ((~gpu | stale_read) ^ readable) : ((cpu | twin_write) ^ writeable);
         if (mask.None()) {
             return;
         }
         if constexpr (is_read) {
             readable = ~gpu | stale_read;
         } else {
-            writeable = cpu;
+            writeable = cpu | twin_write; // tlg: twin pages are writable (AllowTwinWrite)
         }
         tracker->UpdatePageWatchersForRegion<track, is_read>(cpu_addr, mask);
     }
@@ -382,6 +417,7 @@ private:
     RegionBits writeable;
     RegionBits readable;
     RegionBits stale_read{}; ///< tlg: GPU modified pages the CPU may read stale (AllowStaleRead)
+    RegionBits twin_write{}; ///< tlg: GPU modified pages the CPU may write (AllowTwinWrite)
 };
 
 } // namespace VideoCore

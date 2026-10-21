@@ -817,6 +817,18 @@ int runtime_memory_fill_backing(uintptr_t address, int value, uint64_t size) {
     read_unlock();
     return ok;
 }
+/* The backing address of one guest page (4 KiB, aligned), or NULL when it has none. The GPU's
+ * buffer cache merges GPU data into a page the guest is writing there, word by word with atomics
+ * (TLG_TWIN_WRITES); the address stays valid while the page stays mapped. */
+void *runtime_memory_backing_page(uintptr_t page) {
+    read_lock();
+    void *p=NULL;
+    size_t i=vma_index(page);
+    if (i<vma_count && vmas[i].start<=page && page+4096<=vmas[i].end && vmas[i].kind!=KIND_RESERVED)
+        p=backing_base+vmas[i].phys+(page-vmas[i].start);
+    read_unlock();
+    return p;
+}
 /* Reads through the backing view, bypassing GPU page protection; 0 when part of the range has no
  * backing (the caller then reads the guest address directly). GPU-internal threads use it so a
  * read of a page protected for readback (TLG_READBACKS=2) cannot fault into a readback that waits

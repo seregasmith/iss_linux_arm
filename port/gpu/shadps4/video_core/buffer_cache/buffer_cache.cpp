@@ -185,6 +185,9 @@ struct ReadbackStats {
     /// (the GPU had not written the memory again), published a frame late (it had), or dropped
     /// (the CPU wrote the memory since).
     std::atomic<u64> stale_served{0}, stale_fresh{0}, stale_late{0}, stale_dropped{0};
+    /// tlg (TLG_TWIN_WRITES): write faults served without waiting, pages twinned, faults refused
+    /// (no room), game bytes merged, twins dropped with the GPU data back.
+    std::atomic<u64> twin_served{0}, twin_pages{0}, twin_refused{0}, twin_bytes{0}, twin_settled{0};
     std::atomic<s64> window_start{0};
 };
 ReadbackStats& Readbacks() {
@@ -235,6 +238,15 @@ void ReportReadbacks() {
                 static_cast<unsigned long long>(r.stale_fresh.exchange(0)),
                 static_cast<unsigned long long>(r.stale_late.exchange(0)),
                 static_cast<unsigned long long>(r.stale_dropped.exchange(0)));
+    if (BufferCache::TwinWritesEnabled()) {
+        std::printf("  twin writes: %llu served without waiting, %llu pages twinned, %llu refused, "
+                    "%.1f KB of game bytes merged, %llu twins settled\n",
+                    static_cast<unsigned long long>(r.twin_served.exchange(0)),
+                    static_cast<unsigned long long>(r.twin_pages.exchange(0)),
+                    static_cast<unsigned long long>(r.twin_refused.exchange(0)),
+                    r.twin_bytes.exchange(0) / 1024.0,
+                    static_cast<unsigned long long>(r.twin_settled.exchange(0)));
+    }
     std::fflush(stdout);
 }
 } // namespace
@@ -398,7 +410,9 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
         std::scoped_lock lock{eager_mutex};
         ApplyEagerSubtractsLocked();
     }
+    HarvestTwins(device_addr, device_addr + size); // tlg: the CPU's twin bytes go first too
     FlushMergedWrites(arena, device_addr, size); // merged CPU bytes precede the download
+    const u64 sequence = twin_sequence.fetch_add(1, std::memory_order_acq_rel);
     boost::container::small_vector<vk::BufferCopy, 8> copies;
     const u64 total_size_bytes = CollectDownloads(arena, device_addr, size, copies);
     if (total_size_bytes == 0) {
@@ -419,11 +433,11 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
 
     download.buffer->Invalidate(download.offset, download.size);
     for (const auto& copy : copies) {
-        auto* dst_addr = std::bit_cast<u8*>(arena_base + copy.srcOffset);
-        memory->TryWriteBacking(dst_addr, download.mapped + (copy.dstOffset - download.offset),
-                                copy.size);
+        WriteGpuData(arena_base + copy.srcOffset,
+                     download.mapped + (copy.dstOffset - download.offset), copy.size, sequence);
     }
     memory_tracker->UnmarkRegionAsGpuModified(device_addr, size);
+    SettleTwins(device_addr, device_addr + size);
 }
 
 namespace {
@@ -1030,6 +1044,12 @@ bool BufferCache::TryEagerRead(VAddr addr, u64 size) {
             !memory_tracker->IsRegionGpuModified(page_addr, EagerPageSize)) {
             return false;
         }
+        if (twin_count.load(std::memory_order_acquire)) {
+            std::scoped_lock twin_lock{twin_mutex};
+            if (twins.contains(page_addr)) {
+                return false; // tlg: the twin holds CPU bytes the eager copy lacks
+            }
+        }
         if (merged_count.load(std::memory_order_acquire)) {
             std::scoped_lock merge_lock{merge_mutex};
             const auto m = merged_writes.upper_bound(page_addr + EagerPageSize - 1);
@@ -1116,9 +1136,11 @@ std::shared_ptr<BufferCache::DeferredReadback> BufferCache::StartDeferredReadbac
         std::scoped_lock lock{eager_mutex};
         ApplyEagerSubtractsLocked();
     }
+    HarvestTwins(window_start, window_end); // tlg: the CPU's twin bytes go first too
     FlushMergedWrites(arena, window_start, window_end - window_start);
 
     auto readback = std::make_shared<DeferredReadback>();
+    readback->sequence = twin_sequence.fetch_add(1, std::memory_order_acq_rel);
     readback->arena_base = arena->cpu_addr;
     readback->start = window_start;
     readback->end = window_end;
@@ -1187,6 +1209,7 @@ bool BufferCache::FinishDeferredReadback(DeferredReadback& readback, bool wait) 
         return false;
     }
     readback.applied.store(true, std::memory_order_release);
+    SettleTwins(readback.start, readback.end);
     return true;
 }
 
@@ -1366,8 +1389,8 @@ void BufferCache::WriteDeferredCopy(const DeferredReadback& readback, VAddr star
         const VAddr lo = std::max<VAddr>(copy_start, start);
         const VAddr hi = std::min<VAddr>(copy_start + copy.size, end);
         if (lo < hi) {
-            memory->TryWriteBacking(reinterpret_cast<void*>(lo),
-                                    mapped + copy.dstOffset + (lo - copy_start), hi - lo);
+            WriteGpuData(lo, mapped + copy.dstOffset + (lo - copy_start), hi - lo,
+                         readback.sequence);
         }
     }
 }
@@ -1390,6 +1413,233 @@ void BufferCache::MarkDeferredCpuWritten(VAddr addr, u64 size) {
     // A publish already past its check finishes before the guest writes.
     for (const auto& readback : marked) {
         std::scoped_lock lock{readback->mutex};
+    }
+}
+
+// ---- tlg: twin writes (TLG_TWIN_WRITES), see BufferCache::TryTwinWrite --------------------------
+namespace {
+constexpr u64 TwinPageSize = 4096;
+constexpr u32 TwinWords = TwinPageSize / 8;
+/// Room for the twins (6 KiB each); past it a write fault takes the usual path.
+constexpr size_t MaxTwinPages = 2048;
+/// 0xFF in each byte where x and y differ.
+inline u64 ByteDiffMask(u64 x, u64 y) {
+    u64 d = x ^ y;
+    d |= d >> 4;
+    d |= d >> 2;
+    d |= d >> 1;
+    return (d & 0x0101010101010101ULL) * 0xFF;
+}
+} // namespace
+
+bool BufferCache::TwinWritesEnabled() {
+    static const bool enabled = [] {
+        const char* e = std::getenv("TLG_TWIN_WRITES");
+        if (!e || *e != '1') {
+            return false;
+        }
+        if (!StaleReadsEnabled()) {
+            std::printf("GPU: TLG_TWIN_WRITES=1 needs stale buffer reads (TLG_STALE_BUFFER_READS=1, "
+                        "GPU accuracy Precise): off\n");
+            return false;
+        }
+        std::printf("GPU: twin writes on (TLG_TWIN_WRITES=1): the game writes memory the GPU "
+                    "wrote without waiting\n");
+        return true;
+    }();
+    return enabled;
+}
+
+bool BufferCache::TryTwinWrite(VAddr addr, u64 size) {
+    if (!TwinWritesEnabled()) {
+        return false;
+    }
+    const VAddr page = Common::AlignDown(addr, TwinPageSize);
+    // Pages without GPU data take the usual path, which costs no wait.
+    if (addr + size > page + TwinPageSize || !memory_tracker->IsRegionGpuModified(page, TwinPageSize)) {
+        return false;
+    }
+    u8* const backing = memory->BackingPage(page);
+    if (!backing) {
+        return false;
+    }
+    bool created = false;
+    const bool allowed = memory_tracker->AllowTwinWrite(page, TwinPageSize, [&] {
+        std::scoped_lock lock{twin_mutex};
+        if (twins.contains(page)) {
+            return true; // its twin from before still holds the CPU bytes not sent yet
+        }
+        if (twins.size() >= MaxTwinPages) {
+            return false;
+        }
+        // The page cannot change meanwhile: protected for writes, and copies back hold
+        // twin_mutex (WriteGpuData) or this region's lock (ApplyGpuCopyIf).
+        auto twin = std::make_unique<TwinPage>();
+        twin->backing = backing;
+        std::memcpy(twin->words.data(), backing, TwinPageSize);
+        twins.emplace(page, std::move(twin));
+        twin_count.store(static_cast<u32>(twins.size()), std::memory_order_release);
+        created = true;
+        return true;
+    });
+    if (ReadbackStatsEnabled()) {
+        auto& r = Readbacks();
+        (allowed ? r.twin_served : r.twin_refused).fetch_add(1);
+        if (created) {
+            r.twin_pages.fetch_add(1);
+        }
+        ReportReadbacks();
+    }
+    return allowed;
+}
+
+void BufferCache::HarvestTwins(VAddr lo, VAddr hi) {
+    if (!twin_count.load(std::memory_order_acquire)) {
+        return;
+    }
+    boost::container::small_vector<std::pair<VAddr, VAddr>, 32> changed;
+    u64 bytes = 0, settled = 0;
+    {
+        std::scoped_lock lock{twin_mutex};
+        const u32 sequence = static_cast<u32>(twin_sequence.fetch_add(1, std::memory_order_acq_rel));
+        for (auto it = twins.lower_bound(Common::AlignDown(lo, TwinPageSize));
+             it != twins.end() && it->first < hi;) {
+            const VAddr page = it->first;
+            TwinPage& twin = *it->second;
+            if (std::memcmp(twin.backing, twin.words.data(), TwinPageSize) != 0) {
+                const auto* guest = reinterpret_cast<const u64*>(twin.backing);
+                for (u32 w = 0; w < TwinWords; ++w) {
+                    const u64 g = __atomic_load_n(guest + w, __ATOMIC_RELAXED);
+                    if (g == twin.words[w]) {
+                        continue;
+                    }
+                    const u64 diff = ByteDiffMask(g, twin.words[w]);
+                    twin.words[w] = g;
+                    twin.seq[w] = sequence;
+                    for (u32 b = 0; b < 8; ++b) {
+                        if (((diff >> (b * 8)) & 0xFF) == 0) {
+                            continue;
+                        }
+                        const VAddr at = page + w * 8 + b;
+                        if (!changed.empty() && changed.back().second == at) {
+                            changed.back().second = at + 1;
+                        } else {
+                            changed.emplace_back(at, at + 1);
+                        }
+                        ++bytes;
+                    }
+                }
+            }
+            if (!memory_tracker->IsRegionGpuModified(page, TwinPageSize)) {
+                // The GPU data came back by another way: the page tracks as usual again, its CPU
+                // bytes just queued above.
+                it = twins.erase(it);
+                ++settled;
+            } else {
+                ++it;
+            }
+        }
+        twin_count.store(static_cast<u32>(twins.size()), std::memory_order_release);
+    }
+    if (!changed.empty()) {
+        std::scoped_lock lock{merge_mutex};
+        for (const auto& [start, end] : changed) {
+            AddMergedRangeLocked(start, end);
+        }
+        merged_count.store(merged_writes.size(), std::memory_order_release);
+    }
+    if (ReadbackStatsEnabled() && (bytes || settled)) {
+        Readbacks().twin_bytes.fetch_add(bytes);
+        Readbacks().twin_settled.fetch_add(settled);
+    }
+}
+
+void BufferCache::MergeIntoTwin(TwinPage& twin, u64 offset, const u8* src, u64 size,
+                                u64 sequence) {
+    const u32 copy_sequence = static_cast<u32>(sequence);
+    for (u64 pos = offset, end = offset + size; pos < end;) {
+        const u32 w = static_cast<u32>(pos / 8);
+        const u64 word_start = u64{w} * 8;
+        const u64 a = pos, b = std::min<u64>(end, word_start + 8);
+        pos = b;
+        if (static_cast<s32>(twin.seq[w] - copy_sequence) > 0) {
+            continue; // CPU bytes of this word reached the GPU after the copy was made
+        }
+        u64 cover = 0, gpu = 0;
+        for (u64 i = a; i < b; ++i) {
+            cover |= u64{0xFF} << ((i - word_start) * 8);
+        }
+        std::memcpy(reinterpret_cast<u8*>(&gpu) + (a - word_start), src + (a - offset), b - a);
+        auto* guest_word = reinterpret_cast<u64*>(twin.backing) + w;
+        u64 guest = __atomic_load_n(guest_word, __ATOMIC_RELAXED);
+        for (;;) {
+            // Bytes the CPU has not changed since the twin agreed with the GPU take the GPU's.
+            const u64 take = ~ByteDiffMask(guest, twin.words[w]) & cover;
+            const u64 merged = (gpu & take) | (guest & ~take);
+            if (merged == guest || __atomic_compare_exchange_n(guest_word, &guest, merged, false,
+                                                               __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+                twin.words[w] = (gpu & take) | (twin.words[w] & ~take);
+                break;
+            }
+            // The CPU wrote the word meanwhile: compare again with what it wrote.
+        }
+    }
+}
+
+void BufferCache::WriteGpuData(VAddr dst, const u8* src, u64 size, u64 sequence) {
+    if (!TwinWritesEnabled()) {
+        memory->TryWriteBacking(reinterpret_cast<void*>(dst), src, size);
+        return;
+    }
+    // Under twin_mutex throughout, so a page is not twinned halfway through being written.
+    std::scoped_lock lock{twin_mutex};
+    const VAddr end = dst + size;
+    auto it = twins.lower_bound(Common::AlignDown(dst, TwinPageSize));
+    for (VAddr at = dst; at < end;) {
+        const VAddr next_twin =
+            it != twins.end() && it->first < end ? std::max<VAddr>(it->first, at) : end;
+        if (at < next_twin) {
+            memory->TryWriteBacking(reinterpret_cast<void*>(at), src + (at - dst), next_twin - at);
+            at = next_twin;
+            continue;
+        }
+        const VAddr page = it->first;
+        const VAddr chunk_end = std::min<VAddr>(page + TwinPageSize, end);
+        MergeIntoTwin(*it->second, at - page, src + (at - dst), chunk_end - at, sequence);
+        at = chunk_end;
+        ++it;
+    }
+}
+
+void BufferCache::SettleTwins(VAddr lo, VAddr hi) {
+    if (!twin_count.load(std::memory_order_acquire)) {
+        return;
+    }
+    boost::container::small_vector<VAddr, 8> dirty;
+    u64 settled = 0;
+    {
+        std::scoped_lock lock{twin_mutex};
+        for (auto it = twins.lower_bound(Common::AlignDown(lo, TwinPageSize));
+             it != twins.end() && it->first < hi;) {
+            if (memory_tracker->IsRegionGpuModified(it->first, TwinPageSize)) {
+                ++it;
+                continue;
+            }
+            if (std::memcmp(it->second->backing, it->second->words.data(), TwinPageSize) != 0) {
+                dirty.push_back(it->first);
+            }
+            it = twins.erase(it);
+            ++settled;
+        }
+        twin_count.store(static_cast<u32>(twins.size()), std::memory_order_release);
+    }
+    // The GPU data is back and the CPU's bytes are on top: the guest page is whole again and is
+    // uploaded whole at the next use.
+    for (const VAddr page : dirty) {
+        memory_tracker->MarkRegionAsCpuModified(page, TwinPageSize);
+    }
+    if (ReadbackStatsEnabled() && settled) {
+        Readbacks().twin_settled.fetch_add(settled);
     }
 }
 
@@ -1417,7 +1667,12 @@ bool BufferCache::CpuWriteMerge(VAddr dst, const void* src, int fill, u64 size) 
         return false;
     }
     std::scoped_lock lock{merge_mutex};
-    VAddr start = dst, end = dst + size;
+    AddMergedRangeLocked(dst, dst + size);
+    merged_count.store(merged_writes.size(), std::memory_order_release);
+    return true;
+}
+
+void BufferCache::AddMergedRangeLocked(VAddr start, VAddr end) {
     auto it = merged_writes.upper_bound(start);
     if (it != merged_writes.begin() && std::prev(it)->second >= start) {
         --it;
@@ -1430,11 +1685,17 @@ bool BufferCache::CpuWriteMerge(VAddr dst, const void* src, int fill, u64 size) 
         it = merged_writes.erase(it);
     }
     merged_writes.emplace(start, end);
-    merged_count.store(merged_writes.size(), std::memory_order_release);
-    return true;
 }
 
 void BufferCache::FlushMergedWrites(const Buffer* arena, VAddr device_addr, u64 size) {
+    if (twin_count.load(std::memory_order_acquire)) {
+        // tlg (twin writes): what the CPU changed before the game's last submission reaches the
+        // GPU before the work of that submission runs (one comparison of the twins per submission).
+        const u64 epoch = TlgStats::guest_submissions.load(std::memory_order_acquire);
+        if (twin_epoch.exchange(epoch, std::memory_order_acq_rel) != epoch) {
+            HarvestTwins(0, ~VAddr{0});
+        }
+    }
     if (!merged_count.load(std::memory_order_acquire)) {
         return;
     }
