@@ -43,6 +43,7 @@ public:
         gpu.Clear();
         writeable.Fill();
         readable.Fill();
+        stale_read.Clear();
     }
     explicit RegionManager() = default;
 
@@ -101,6 +102,10 @@ public:
         if constexpr (type == Type::GPU && enable) {
             NoteGpuBitsSet();
         }
+        if constexpr (type == Type::GPU) {
+            // tlg: a new GPU write (or the data back): stale reads end (see AllowStaleRead).
+            stale_read.UnsetRange(start_page, end_page);
+        }
         if constexpr (enable) {
             bits.SetRange(start_page, end_page);
         } else {
@@ -140,6 +145,28 @@ public:
         UpdateProtection<false, false>();
     }
 
+    /// tlg: TLG_STALE_BUFFER_READS=1 (BufferCache::TryStaleRead): the CPU may read the GPU
+    /// modified pages of the range without waiting for the GPU. They stay GPU modified, so a CPU
+    /// write still brings the GPU data back first; a read sees the copy published last (a frame
+    /// late). The next GPU write to a page protects it again. True when a page of the range was
+    /// protected for reads and no longer is. The caller holds the lock.
+    bool AllowStaleRead(VAddr addr, u64 size) {
+        const size_t offset = addr - cpu_addr;
+        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page =
+            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
+        if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
+            return false;
+        }
+        const RegionBits add(gpu & ~stale_read, start_page, end_page);
+        if (add.None()) {
+            return false;
+        }
+        stale_read |= add;
+        UpdateProtection<false, true>();
+        return true;
+    }
+
     /**
      * Loop over each page in the given range, turn off those bits and notify the tracker if
      * needed. Call the given function on each turned off range.
@@ -177,6 +204,7 @@ public:
                 UpdateProtection<true, false>();
             } else {
                 NoteGpuBitsCleared();
+                stale_read.UnsetRange(start_page, end_page);
                 if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
                     UpdateProtection<false, true>();
                 }
@@ -238,12 +266,13 @@ private:
     template <bool track, bool is_read>
     void UpdateProtection() {
         RENDERER_TRACE;
-        RegionBits mask = is_read ? (~gpu ^ readable) : (cpu ^ writeable);
+        // tlg: GPU modified pages are protected for reads unless allowed stale (AllowStaleRead).
+        RegionBits mask = is_read ? ((~gpu | stale_read) ^ readable) : (cpu ^ writeable);
         if (mask.None()) {
             return;
         }
         if constexpr (is_read) {
-            readable = ~gpu;
+            readable = ~gpu | stale_read;
         } else {
             writeable = cpu;
         }
@@ -352,6 +381,7 @@ private:
     RegionBits gpu;
     RegionBits writeable;
     RegionBits readable;
+    RegionBits stale_read{}; ///< tlg: GPU modified pages the CPU may read stale (AllowStaleRead)
 };
 
 } // namespace VideoCore

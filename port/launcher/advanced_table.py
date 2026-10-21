@@ -82,6 +82,12 @@ _ROWS = (
     ('read', 'BACKING_INVALIDATE', 'bool', '0', ('Reload textures after GPU copies', 'Recarregar texturas após cópias da GPU'),
      ('Experimental (gow3_pc #331): textures over memory that a GPU readback just wrote are marked stale and reloaded. May cost FPS on 6 GB cards.',
       'Experimental (gow3_pc #331): texturas sobre memória que uma leitura da GPU acabou de escrever são marcadas como antigas e recarregadas. Pode custar FPS em placas de 6 GB.'), {'risky': True}),
+    ('read', 'STALE_BUFFER_READS', 'bool', '0', ('Read GPU results a frame late', 'Ler resultados da GPU com um quadro de atraso'),
+     ('Experimental, needs "Precise" GPU accuracy: when the game reads memory the GPU wrote, it gets the version '
+      'from about a frame earlier at once instead of waiting for the GPU. Fewer stalls; some effects may lag a frame.',
+      'Experimental, precisa da precisão "Preciso": quando o jogo lê memória que a GPU escreveu, recebe na hora a '
+      'versão de cerca de um quadro antes em vez de esperar a GPU. Menos travadas; alguns efeitos podem atrasar um quadro.'),
+     {'risky': True}),
     ('read', 'WRITE_MERGE', 'bool', '1', ('Merge game writes', 'Juntar escritas do jogo'),
      ('Writes the game makes into memory the GPU also touches go straight through, without waiting.',
       'Escritas do jogo em memória que a GPU também mexe passam direto, sem esperar.'), {}),

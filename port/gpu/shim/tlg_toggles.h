@@ -143,6 +143,9 @@ struct Timer {
 inline std::atomic<std::uint64_t> gpu_idle_ns{0};
 /// Draws recorded into the reduced scene targets, and draws after the scene started.
 inline std::atomic<std::uint64_t> reduced_draws{0}, scene_draws{0};
+/// The same per frame over the last frame-stats window (5 s), kept for the in-game menu's Image
+/// tab; -1 until the first window (and without TLG_FRAME_STATS).
+inline std::atomic<float> menu_reduced_draws{-1.0f}, menu_scene_draws{-1.0f};
 /// Wall time spent blocked in the scheduler (ns): waiting for the recording thread to drain,
 /// for host copies before a submission or fence, and for GPU ticks.
 inline std::atomic<std::uint64_t> sync_recording_ns{0}, host_copies_wait_ns{0}, tick_wait_ns{0},

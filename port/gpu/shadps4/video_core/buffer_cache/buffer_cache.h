@@ -181,6 +181,15 @@ public:
     void NoteReadback(VAddr addr, u64 size);
     void EagerCopyAtFence();
 
+    /// tlg: TLG_STALE_BUFFER_READS=1 (deferred readbacks, precise mode): a CPU read fault on GPU
+    /// modified memory does not wait. The pages around it become readable as they are (the copy
+    /// published last, about a frame old) while staying GPU modified, and a copy of the current
+    /// GPU data is recorded; when the GPU has made it, it is written back (FinishStaleCopy), even
+    /// if the GPU wrote the memory again meanwhile (then the pages stay GPU modified). CPU writes
+    /// still wait for the GPU data, so no byte the GPU or the CPU wrote is lost; only reads may
+    /// see a frame-old version. False: the caller reads back the precise way. Guest threads.
+    bool TryStaleRead(VAddr addr, u64 size);
+
 private:
     /// Uploads the merged guest writes inside [device_addr, device_addr + size) of `arena`.
     void FlushMergedWrites(const Buffer* arena, VAddr device_addr, u64 size);
@@ -231,6 +240,10 @@ private:
         u64 tick{};
         std::atomic<bool> stale{};
         std::atomic<bool> applied{};
+        /// tlg (stale buffer reads): the CPU wrote the memory after the copy was recorded, so
+        /// the copy must not be published over it; and a publish is scheduled (keeps the staging).
+        std::atomic<bool> cpu_written{};
+        std::atomic<bool> publish_pending{};
         /// Won't be applied; its ranges are back in gpu_modified_ranges.
         std::atomic<bool> recovered{};
         std::mutex mutex;
@@ -269,6 +282,18 @@ private:
     /// Marks the copies in flight overlapping a range stale. `cpu`: a guest thread is about to
     /// write the memory without a fault, so an apply in progress is waited for. Any thread.
     void MarkDeferredStale(VAddr addr, u64 size, bool cpu);
+    /// tlg (stale buffer reads): see TryStaleRead.
+    static bool StaleReadsEnabled();
+    /// Records the copy for a stale read and schedules FinishStaleCopy. GPU-side threads.
+    void StartStaleCopy(VAddr addr, u64 size);
+    /// Applies the copy (the GPU has made it), or publishes it when the GPU wrote the memory
+    /// again since. Any thread.
+    void FinishStaleCopy(DeferredReadback& readback);
+    /// Writes the bytes of a copy into guest memory for [start, end). Under readback.mutex.
+    void WriteDeferredCopy(const DeferredReadback& readback, VAddr start, VAddr end);
+    /// The copies in flight overlapping a range the CPU is about to write must not be
+    /// published over it. Any thread.
+    void MarkDeferredCpuWritten(VAddr addr, u64 size);
     std::mutex deferred_mutex; ///< guards the list (guest threads read it)
     std::vector<std::shared_ptr<DeferredReadback>> deferred_readbacks;
     std::atomic<u32> deferred_count{0};

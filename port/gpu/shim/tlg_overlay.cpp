@@ -16,6 +16,7 @@
 
 #include <SDL3/SDL.h>
 #include "tlg_settings.h"
+#include "tlg_toggles.h"
 #include "tlg_orbs.h"
 #include "tlg_actors.h"
 #include "tlg_graphics.h"
@@ -441,7 +442,24 @@ void ImageTab() {
     if (BeginRows("##image_info")) {
         char text[96];
         std::snprintf(text, sizeof(text), "%d x %d", iw, ih);
-        InfoRow(TL("Game image", "Imagem do jogo"), text);
+        // tlg: the game's finished frame (its display buffer) stays at the game's own size; the
+        // render resolution shrinks the 3D scene drawn into it, which is then scaled up.
+        InfoRow(TL("Game image (finished frame)", "Imagem do jogo (quadro final)"), text);
+        const int rw = s.active_render_width, rh = s.active_render_height;
+        std::snprintf(text, sizeof(text), "%d x %d%s", rw, rh,
+                      rw < iw || rh < ih ? TL(" (scaled up to the game image)", " (ampliada para a imagem do jogo)")
+                                         : TL(" (full size)", " (tamanho cheio)"));
+        InfoRow(TL("3D scene (Render resolution)", "Cena 3D (Resolução de renderização)"), text);
+        const float reduced = TlgStats::menu_reduced_draws.load(std::memory_order_relaxed);
+        const float scene = TlgStats::menu_scene_draws.load(std::memory_order_relaxed);
+        if (reduced < 0.0f) {
+            std::snprintf(text, sizeof(text), "%s", TlgStats::enabled ? TL("measuring (5 s)...", "medindo (5 s)...")
+                                                                       : TL("n/a (frame stats off)", "n/d (estatísticas desligadas)"));
+        } else {
+            std::snprintf(text, sizeof(text), "%.0f %s %.0f %s", reduced, TL("of", "de"), scene,
+                          TL("per frame", "por quadro"));
+        }
+        InfoRow(TL("Scene draws at the reduced size", "Desenhos da cena no tamanho reduzido"), text);
         std::snprintf(text, sizeof(text), "%d x %d", ww, wh);
         InfoRow(TL("Windowed", "Janela"), text);
         InfoRow("FSR 1", !s.fsr1 ? TL("off", "desligado") : upscaling ? TL("active", "ativo") : TL("no effect (image not smaller than window)", "sem efeito (imagem não é menor que a janela)"));

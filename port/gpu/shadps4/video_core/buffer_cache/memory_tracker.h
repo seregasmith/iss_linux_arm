@@ -77,6 +77,17 @@ public:
                             });
     }
 
+    /// tlg: see RegionManager::AllowStaleRead (TLG_STALE_BUFFER_READS). True when a page of the
+    /// range was protected for reads and no longer is.
+    bool AllowStaleRead(VAddr addr, u64 query_size) {
+        bool allowed = false;
+        IteratePages<false>(addr, query_size, [&allowed](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            allowed |= manager->AllowStaleRead(manager->GetCpuAddr() + offset, size);
+        });
+        return allowed;
+    }
+
     /// Unmark region as modified from the host GPU
     void UnmarkRegionAsGpuModified(VAddr dirty_cpu_addr, u64 query_size) noexcept {
         IteratePages<false>(dirty_cpu_addr, query_size,
@@ -94,7 +105,9 @@ public:
     /// side marks the copy outdated before it marks the memory GPU modified again, under these
     /// locks, so a newer GPU write is never unmarked. Pages no longer marked were brought back
     /// by someone else and may hold newer CPU writes since: they are not written. Returns pred().
-    template <typename Pred, typename Write>
+    /// tlg: unmark = false (stale buffer reads) publishes an outdated copy: the pages are written
+    /// the same way but stay GPU modified.
+    template <bool unmark = true, typename Pred, typename Write>
     bool ApplyGpuCopyIf(VAddr cpu_addr, u64 size, Pred&& pred, Write&& write) {
         struct Segment {
             RegionManager* manager;
@@ -139,7 +152,9 @@ public:
                 if (in_run) {
                     write(base + run_start, base + offset + seg_size);
                 }
-                manager->template ChangeRegionState<Type::GPU, false>(base + offset, seg_size);
+                if constexpr (unmark) {
+                    manager->template ChangeRegionState<Type::GPU, false>(base + offset, seg_size);
+                }
             }
         }
         for (size_t i = count; i-- > 0;) {

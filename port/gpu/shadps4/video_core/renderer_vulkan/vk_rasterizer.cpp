@@ -3880,6 +3880,9 @@ bool Rasterizer::ReadMemory(VAddr addr, u64 size, bool assume_locks) {
     } else if (!assume_locks && !image_readback && buffer_cache.TryEagerRead(addr, size)) {
         // tlg: served from the copy made at the last fence (TLG_EAGER_READBACK). Not after an
         // image readback: that resolved newer data the buffer copy would overwrite.
+    } else if (!assume_locks && !image_readback && buffer_cache.TryStaleRead(addr, size)) {
+        // tlg: TLG_STALE_BUFFER_READS=1: read as it is (about a frame old) without waiting;
+        // the current GPU data follows when the GPU has copied it (BufferCache::TryStaleRead).
     } else if (!image_readback || buffer_cache.IsRegionGpuModified(addr, size)) {
         if (!assume_locks) {
             buffer_cache.NoteReadback(addr, size);

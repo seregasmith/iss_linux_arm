@@ -577,6 +577,14 @@ void VideoOutDriver::Flip(const Request& req) {
                                            ? double(gpu_us - window_gpu_us) / (all_draws - window_draws)
                                            : 0.0;
             const double draws_per_frame = frames ? double(all_draws - window_draws) / frames : 0.0;
+            // tlg: also shown in the menu (Image > Information: how much of the scene the render
+            // resolution really reduced).
+            const double reduced_per_frame =
+                frames ? double(TlgStats::reduced_draws.exchange(0)) / frames : 0.0;
+            const double scene_per_frame =
+                frames ? double(TlgStats::scene_draws.exchange(0)) / frames : 0.0;
+            TlgStats::menu_reduced_draws.store(float(reduced_per_frame), std::memory_order_relaxed);
+            TlgStats::menu_scene_draws.store(float(scene_per_frame), std::memory_order_relaxed);
             window_draws = all_draws;
             window_gpu_us = gpu_us;
             std::printf("Frame stats: %.1f FPS, worst frame %.1f ms (vblank %u Hz); "
@@ -599,8 +607,7 @@ void VideoOutDriver::Flip(const Request& req) {
                         frames ? double(TlgStats::host_copy_waits.exchange(0)) / frames : 0.0,
                         TlgStats::copy_threads_wait_ns.exchange(0) / (window * 1e7),
                         TlgStats::tick_wait_ns.exchange(0) / (window * 1e7),
-                        frames ? double(TlgStats::reduced_draws.exchange(0)) / frames : 0.0,
-                        frames ? double(TlgStats::scene_draws.exchange(0)) / frames : 0.0);
+                        reduced_per_frame, scene_per_frame);
             presenter->GetRasterizer().GetPipelineCache().ReportCompilerStats();
             Vulkan::WaitDiagnostics::Report();
             Common::Backports::LogHits();

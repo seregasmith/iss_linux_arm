@@ -181,6 +181,10 @@ struct ReadbackStats {
     /// Waits for a readback copy tick (WaitReadbackTick): the scheduler's own waits do not
     /// count them.
     std::atomic<u64> guest_waits{0}, guest_wait_ns{0};
+    /// tlg (TLG_STALE_BUFFER_READS): read faults served without waiting; their copies applied
+    /// (the GPU had not written the memory again), published a frame late (it had), or dropped
+    /// (the CPU wrote the memory since).
+    std::atomic<u64> stale_served{0}, stale_fresh{0}, stale_late{0}, stale_dropped{0};
     std::atomic<s64> window_start{0};
 };
 ReadbackStats& Readbacks() {
@@ -223,9 +227,14 @@ void ReportReadbacks() {
                 static_cast<unsigned long long>(r.eager_used.exchange(0)),
                 static_cast<unsigned long long>(r.eager_stale.exchange(0)),
                 static_cast<unsigned long long>(r.eager_skipped.exchange(0)));
-    std::printf("  waits for a readback copy: %llu, %.1f ms\n",
+    std::printf("  waits for a readback copy: %llu, %.1f ms; stale reads: %llu served without waiting, "
+                "%llu copies applied, %llu published a frame late, %llu dropped\n",
                 static_cast<unsigned long long>(r.guest_waits.exchange(0)),
-                r.guest_wait_ns.exchange(0) / 1e6);
+                r.guest_wait_ns.exchange(0) / 1e6,
+                static_cast<unsigned long long>(r.stale_served.exchange(0)),
+                static_cast<unsigned long long>(r.stale_fresh.exchange(0)),
+                static_cast<unsigned long long>(r.stale_late.exchange(0)),
+                static_cast<unsigned long long>(r.stale_dropped.exchange(0)));
     std::fflush(stdout);
 }
 } // namespace
@@ -271,6 +280,10 @@ std::tuple<const Buffer*, VAddr, VAddr> BufferCache::GetReadbackWindow(VAddr dev
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool assume_locks) {
+    if (is_write && StaleReadsEnabled()) {
+        // A stale read's copy recorded before this write must not be published over it.
+        MarkDeferredCpuWritten(device_addr, size);
+    }
     TlgPerf::Span trace_read{TlgPerf::Kind::WaitBegin, TlgPerf::Kind::WaitEnd,
                             TlgPerf::Label("buffer_readback"), is_write ? 1ULL : 0ULL};
     const auto trace_operation = trace_read.Id();
@@ -1167,20 +1180,9 @@ bool BufferCache::FinishDeferredReadback(DeferredReadback& readback, bool wait) 
         return false;
     }
     readback.staging.Invalidate();
-    const u8* const mapped = readback.staging.mapped - readback.staging.offset;
     const bool applied = memory_tracker->ApplyGpuCopyIf(
         readback.start, readback.end - readback.start, [&] { return !readback.stale.load(); },
-        [&](VAddr start, VAddr end) {
-            for (const auto& copy : readback.copies) {
-                const VAddr copy_start = readback.arena_base + copy.srcOffset;
-                const VAddr lo = std::max<VAddr>(copy_start, start);
-                const VAddr hi = std::min<VAddr>(copy_start + copy.size, end);
-                if (lo < hi) {
-                    memory->TryWriteBacking(reinterpret_cast<void*>(lo),
-                                            mapped + copy.dstOffset + (lo - copy_start), hi - lo);
-                }
-            }
-        });
+        [&](VAddr start, VAddr end) { WriteDeferredCopy(readback, start, end); });
     if (!applied) {
         return false;
     }
@@ -1240,7 +1242,8 @@ void BufferCache::PruneDeferredReadbacks() {
     }
     std::scoped_lock lock{deferred_mutex};
     std::erase_if(deferred_readbacks, [this](const std::shared_ptr<DeferredReadback>& readback) {
-        if (!readback->Done()) {
+        // tlg: a stale read's publish still to come reads the staging memory.
+        if (!readback->Done() || readback->publish_pending.load(std::memory_order_acquire)) {
             return false;
         }
         // Freed for reuse once the current tick completes; a guest thread still holding the
@@ -1262,12 +1265,129 @@ void BufferCache::MarkDeferredStale(VAddr addr, u64 size, bool cpu) {
             if (!readback->Done() && readback->start < addr + size && addr < readback->end) {
                 readback->stale.store(true);
                 if (cpu) {
+                    readback->cpu_written.store(true);
                     marked.push_back(readback);
                 }
             }
         }
     }
     // An apply already past its stale check finishes before the guest writes.
+    for (const auto& readback : marked) {
+        std::scoped_lock lock{readback->mutex};
+    }
+}
+
+// tlg: TLG_STALE_BUFFER_READS=1, see BufferCache::TryStaleRead (buffer_cache.h).
+bool BufferCache::StaleReadsEnabled() {
+    static const bool enabled = [] {
+        const char* e = std::getenv("TLG_STALE_BUFFER_READS");
+        if (!e || *e != '1') {
+            return false;
+        }
+        if (!DeferredReadbackEnabled()) {
+            std::printf("GPU: TLG_STALE_BUFFER_READS=1 needs GPU accuracy Precise and deferred "
+                        "readbacks: off\n");
+            return false;
+        }
+        std::printf("GPU: stale buffer reads on (TLG_STALE_BUFFER_READS=1): the game reads GPU "
+                    "results without waiting, about a frame late\n");
+        return true;
+    }();
+    return enabled;
+}
+
+bool BufferCache::TryStaleRead(VAddr addr, u64 size) {
+    if (!StaleReadsEnabled()) {
+        return false;
+    }
+    // The faulting page first: when this cache did not protect it (another watcher does, or a
+    // GPU write raced the fault) the caller reads it back the precise way, so a fault never
+    // comes back here for the same page.
+    if (!memory_tracker->AllowStaleRead(addr, size)) {
+        return false;
+    }
+    // The rest of the readback window as well: the copy below covers all of it.
+    const auto window = GetReadbackWindow(addr, size);
+    const VAddr window_start = std::get<1>(window);
+    const VAddr window_end = std::get<2>(window);
+    memory_tracker->AllowStaleRead(window_start, window_end - window_start);
+    // A copy in flight that covers it brings the data anyway (whoever recorded it applies it).
+    if (!PendingDeferredReadback(addr, size)) {
+        liverpool->SendCommand<false, true>([this, addr, size] { StartStaleCopy(addr, size); });
+    }
+    if (ReadbackStatsEnabled()) {
+        Readbacks().stale_served.fetch_add(1);
+        ReportReadbacks();
+    }
+    return true;
+}
+
+void BufferCache::StartStaleCopy(VAddr addr, u64 size) {
+    const auto readback = StartDeferredReadback(addr, size);
+    if (!readback || readback->Done() || readback->publish_pending.exchange(true)) {
+        return; // nothing GPU modified left to copy, or a publish is already scheduled
+    }
+    scheduler.DeferPriorityOperation([this, readback] { FinishStaleCopy(*readback); },
+                                     readback->tick);
+}
+
+void BufferCache::FinishStaleCopy(DeferredReadback& readback) {
+    if (FinishDeferredReadback(readback, false)) {
+        if (ReadbackStatsEnabled()) {
+            Readbacks().stale_fresh.fetch_add(1);
+        }
+    } else {
+        // The GPU wrote the memory again after the copy (stale), or the copy was given up
+        // (recovered): its bytes are still newer than the guest's. They are written with the
+        // pages left GPU modified (the GPU has newer data), unless the CPU wrote there since.
+        bool published = false;
+        {
+            std::scoped_lock lock{readback.mutex};
+            if (!readback.applied.load(std::memory_order_acquire) &&
+                !readback.cpu_written.load(std::memory_order_acquire)) {
+                readback.staging.Invalidate();
+                published = memory_tracker->ApplyGpuCopyIf<false>(
+                    readback.start, readback.end - readback.start,
+                    [&] { return !readback.cpu_written.load(); },
+                    [&](VAddr start, VAddr end) { WriteDeferredCopy(readback, start, end); });
+            }
+        }
+        if (ReadbackStatsEnabled()) {
+            (published ? Readbacks().stale_late : Readbacks().stale_dropped).fetch_add(1);
+        }
+    }
+    readback.publish_pending.store(false, std::memory_order_release);
+}
+
+void BufferCache::WriteDeferredCopy(const DeferredReadback& readback, VAddr start, VAddr end) {
+    const u8* const mapped = readback.staging.mapped - readback.staging.offset;
+    for (const auto& copy : readback.copies) {
+        const VAddr copy_start = readback.arena_base + copy.srcOffset;
+        const VAddr lo = std::max<VAddr>(copy_start, start);
+        const VAddr hi = std::min<VAddr>(copy_start + copy.size, end);
+        if (lo < hi) {
+            memory->TryWriteBacking(reinterpret_cast<void*>(lo),
+                                    mapped + copy.dstOffset + (lo - copy_start), hi - lo);
+        }
+    }
+}
+
+void BufferCache::MarkDeferredCpuWritten(VAddr addr, u64 size) {
+    if (!deferred_count.load(std::memory_order_acquire)) {
+        return;
+    }
+    boost::container::small_vector<std::shared_ptr<DeferredReadback>, 4> marked;
+    {
+        std::scoped_lock lock{deferred_mutex};
+        for (const auto& readback : deferred_readbacks) {
+            if ((!readback->Done() || readback->publish_pending.load(std::memory_order_acquire)) &&
+                readback->start < addr + size && addr < readback->end) {
+                readback->cpu_written.store(true);
+                marked.push_back(readback);
+            }
+        }
+    }
+    // A publish already past its check finishes before the guest writes.
     for (const auto& readback : marked) {
         std::scoped_lock lock{readback->mutex};
     }

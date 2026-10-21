@@ -919,6 +919,16 @@ public:
         priority_pending_ops_cv.notify_one();
     }
 
+    /// tlg: as DeferPriorityOperation, once the GPU has reached `tick` (stale buffer reads,
+    /// BufferCache::StartStaleCopy).
+    void DeferPriorityOperation(Common::UniqueFunction<void>&& func, u64 tick) {
+        {
+            std::unique_lock lk(priority_pending_ops_mutex);
+            priority_pending_ops.emplace(std::move(func), tick);
+        }
+        priority_pending_ops_cv.notify_one();
+    }
+
     /// tlg: the graphics queue lock: Vulkan needs every submit, sparse bind and present on the
     /// queue externally synchronized, and the presenter presents on the same queue. Held across
     /// each whole SubmitExecution unless TLG_SPLIT_SUBMIT_LOCK=1.
